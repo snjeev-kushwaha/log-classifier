@@ -4,6 +4,7 @@ HTTP layer. Thin by design - all decision logic lives in ClassificationService.
 import csv
 import io
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -13,9 +14,10 @@ from app.api.deps import get_classification_service
 from app.api.rate_limit import limiter
 from app.api.security import require_api_key
 from app.core.config import settings
-from app.db.models import ClassificationRecord
+from app.db.models import ClassificationRecord, User
 from app.db.session import get_db
 from app.models.schemas import (
+    ClassificationMethod,
     ClassificationResult,
     FeedbackRequest,
     HealthResponse,
@@ -40,17 +42,58 @@ def health(service: ClassificationService = Depends(get_classification_service))
     )
 
 
+from datetime import datetime, timezone
+from app.api.security import get_optional_current_user, require_api_key
+from app.repositories.postgres import SqlUsageRepository
+
+
 @router.post("/classify", response_model=ClassificationResult, dependencies=[Depends(require_api_key)])
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 def classify_log(
     request: Request,  # required by slowapi to read the client key
     payload: LogClassifyRequest,
     service: ClassificationService = Depends(get_classification_service),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
-    result = service.classify(payload.text, source=payload.source)
+    # Enforce daily quota if user is authenticated
+    if current_user:
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        usage_repo = SqlUsageRepository(db)
+        count, within_limit = usage_repo.increment_and_check(current_user.id, today_str, settings.daily_user_quota)
+        if not within_limit:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Daily usage quota exceeded ({settings.daily_user_quota} classifications/day).",
+            )
+
+    # Check dynamic DB regex rules first if any exist
+    from app.repositories.postgres import SqlRegexRuleRepository
+    import re
+    rule_repo = SqlRegexRuleRepository(db)
+    active_rules = rule_repo.list_active()
+    dynamic_match_label = None
+    for r in active_rules:
+        try:
+            if re.search(r.pattern, payload.text, re.IGNORECASE):
+                dynamic_match_label = r.label
+                break
+        except Exception:
+            pass
+
+    if dynamic_match_label:
+        result = ClassificationResult(
+            text=payload.text,
+            label=dynamic_match_label,
+            confidence=1.0,
+            method_used=ClassificationMethod.REGEX,
+            needs_human_review=False,
+        )
+    else:
+        result = service.classify(payload.text, source=payload.source)
 
     record = ClassificationRecord(
+        user_id=current_user.id if current_user else None,
         text=result.text,
         label=result.label,
         confidence=result.confidence,
@@ -69,6 +112,7 @@ async def classify_batch(
     request: Request,
     file: UploadFile,
     service: ClassificationService = Depends(get_classification_service),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -130,6 +174,7 @@ async def classify_batch(
         })
         records_to_persist.append(
             ClassificationRecord(
+                user_id=current_user.id if current_user else None,
                 text=result.text,
                 label=result.label,
                 confidence=result.confidence,

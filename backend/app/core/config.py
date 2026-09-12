@@ -36,10 +36,15 @@ class Settings(BaseSettings):
     # --- CORS ---
     frontend_origin: str = "http://localhost:5173"
 
-    # --- API security ---
-    # Comma-separated list of accepted API keys. Empty = auth disabled
-    # (fine for local dev; ALWAYS set this in staging/production).
+    # --- API security & JWT Auth ---
+    # Comma-separated list of accepted static API keys.
     api_keys: str = ""
+    jwt_secret_key: str = "dev-jwt-secret-key-super-secure-change-in-production-1234567890"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 14
+    daily_user_quota: int = 1000
+
     # Requests per minute per client IP, applied to the classification
     # endpoints. Batch CSV uploads get a stricter separate limit below.
     rate_limit_per_minute: int = 60

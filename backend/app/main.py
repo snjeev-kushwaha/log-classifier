@@ -13,8 +13,11 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from app.api.admin import router as admin_router
+from app.api.auth import router as auth_router
 from app.api.rate_limit import limiter
-from app.api.routes import router
+from app.api.routes import router as routes_router
+from app.api.user import router as user_router
 from app.core.config import settings
 from app.core.logging_config import configure_logging, set_request_id
 from app.db.session import Base, engine
@@ -34,6 +37,32 @@ async def lifespan(app: FastAPI):
         )
     if settings.environment == "production" and not settings.groq_api_key:
         logger.warning("GROQ_API_KEY is not set - the LLM fallback layer will be unavailable.")
+
+    # Initialize dynamic regex rules from DB if present
+    try:
+        from app.api.deps import get_classification_service
+        from app.db.session import SessionLocal
+        from app.repositories.postgres import SqlRegexRuleRepository
+        from app.services.regex_classifier import RegexRule
+        import re
+
+        db = SessionLocal()
+        rule_repo = SqlRegexRuleRepository(db)
+        db_rules = rule_repo.list_active()
+        if db_rules:
+            service = get_classification_service()
+            loaded_rules = []
+            for r in db_rules:
+                try:
+                    loaded_rules.append(RegexRule(label=r.label, pattern=re.compile(r.pattern, re.IGNORECASE)))
+                except re.error:
+                    pass
+            if loaded_rules:
+                service.regex_classifier.rules = loaded_rules
+        db.close()
+    except Exception as exc:
+        logger.warning("Could not pre-load DB regex rules: %s", exc)
+
     logger.info("Startup complete", extra={"environment": settings.environment})
     yield
 
@@ -85,7 +114,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
-app.include_router(router, prefix="/api/v1")
+app.include_router(routes_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(admin_router, prefix="/api/v1")
+app.include_router(user_router, prefix="/api/v1")
 
 # Exposes GET /metrics in Prometheus text format: request counts, latency
 # histograms, and in-progress requests, broken down by path and status code.

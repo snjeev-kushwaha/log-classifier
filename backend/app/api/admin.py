@@ -1,0 +1,314 @@
+"""
+Admin Control Center endpoints:
+- User & role management (list, role change, activation/deactivation)
+- System-wide classification telemetry & method distribution
+- Dynamic regex rule management (CRUD with runtime cache reload)
+- ML model version registry inspection & hot-activation
+- Audit log querying
+All endpoints strictly require the 'admin' role.
+"""
+from datetime import datetime
+import os
+from pathlib import Path
+import re
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_classification_service
+from app.api.security import require_role
+from app.core.config import settings
+from app.db.models import AuditLog, ClassificationRecord, DbRegexRule, User
+from app.db.session import get_db
+from app.models.schemas import (
+    AuditLogResponse,
+    ClassificationHistoryItem,
+    ModelVersionResponse,
+    RegexRuleCreate,
+    RegexRuleResponse,
+    UserResponse,
+    UserUpdateRequest,
+)
+from app.repositories.postgres import (
+    SqlAuditLogRepository,
+    SqlRegexRuleRepository,
+    SqlUserRepository,
+)
+from app.services.classification_service import ClassificationService
+from app.services.ml_classifier import MLClassifier
+from app.services.regex_classifier import RegexRule
+
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin-control-center"],
+    dependencies=[Depends(require_role("admin"))],
+)
+
+
+# --- User & Role Management ---
+
+@router.get("/users")
+def list_users(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    role: Optional[str] = Query(default=None),
+    is_active: Optional[bool] = Query(default=None),
+    q: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """List all users with optional filtering by role, status, or search query."""
+    user_repo = SqlUserRepository(db)
+    users, total = user_repo.list_users(skip=skip, limit=limit, role=role, is_active=is_active, query=q)
+    return {
+        "users": [UserResponse.model_validate(u) for u in users],
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+    }
+
+
+@router.patch("/users/{user_id}", response_model=UserResponse)
+def update_user(
+    user_id: int,
+    request: UserUpdateRequest,
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Change a user's role, active status, or details, and record an audit log."""
+    user_repo = SqlUserRepository(db)
+    audit_repo = SqlAuditLogRepository(db)
+
+    user = user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    update_data: dict[str, Any] = {}
+    if request.role is not None:
+        update_data["role"] = request.role.value
+    if request.is_active is not None:
+        update_data["is_active"] = request.is_active
+    if request.full_name is not None:
+        update_data["full_name"] = request.full_name
+
+    updated_user = user_repo.update(user, **update_data)
+
+    # Record audit log entry
+    audit_repo.log(
+        actor_id=current_admin.id,
+        action="USER_UPDATE",
+        target=f"user:{user_id}",
+        metadata={"changes": update_data, "admin_email": current_admin.email},
+    )
+
+    return updated_user
+
+
+# --- System-wide Classification Activity & Telemetry ---
+
+@router.get("/classifications")
+def get_system_classifications(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    method_used: Optional[str] = Query(default=None),
+    label: Optional[str] = Query(default=None),
+    user_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """View system-wide classification telemetry with method distribution breakdown."""
+    query = db.query(ClassificationRecord)
+    if method_used:
+        query = query.filter(ClassificationRecord.method_used == method_used)
+    if label:
+        query = query.filter(ClassificationRecord.label == label)
+    if user_id:
+        query = query.filter(ClassificationRecord.user_id == user_id)
+
+    total = query.count()
+    records = query.order_by(ClassificationRecord.created_at.desc()).offset(skip).limit(limit).all()
+
+    # Aggregate telemetry for charts (is LLM traffic growing?)
+    method_counts = (
+        db.query(ClassificationRecord.method_used, func.count(ClassificationRecord.id))
+        .group_by(ClassificationRecord.method_used)
+        .all()
+    )
+    distribution = {method: count for method, count in method_counts}
+
+    return {
+        "items": [ClassificationHistoryItem.model_validate(r) for r in records],
+        "total": total,
+        "method_distribution": distribution,
+        "skip": skip,
+        "limit": limit,
+    }
+
+
+# --- Dynamic Regex Rule Management ---
+
+@router.get("/regex-rules", response_model=list[RegexRuleResponse])
+def list_regex_rules(db: Session = Depends(get_db)):
+    """List all persisted dynamic regex classification rules."""
+    rule_repo = SqlRegexRuleRepository(db)
+    return rule_repo.list_active()
+
+
+@router.post("/regex-rules", response_model=RegexRuleResponse, status_code=status.HTTP_201_CREATED)
+def create_regex_rule(
+    request: RegexRuleCreate,
+    current_admin: User = Depends(require_role("admin")),
+    service: ClassificationService = Depends(get_classification_service),
+    db: Session = Depends(get_db),
+):
+    """Validate, persist, and live-reload a new regex classification rule without redeployment."""
+    try:
+        compiled = re.compile(request.pattern, re.IGNORECASE)
+    except re.error as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid regular expression syntax: {exc}",
+        )
+
+    rule_repo = SqlRegexRuleRepository(db)
+    audit_repo = SqlAuditLogRepository(db)
+
+    rule = rule_repo.create(
+        label=request.label,
+        pattern=request.pattern,
+        description=request.description,
+    )
+
+    # Hot-reload rule into in-memory classifier pipeline
+    service.regex_classifier.rules.append(
+        RegexRule(label=rule.label, pattern=compiled)
+    )
+
+    audit_repo.log(
+        actor_id=current_admin.id,
+        action="RULE_CREATE",
+        target=f"rule:{rule.id}",
+        metadata={"label": rule.label, "pattern": rule.pattern},
+    )
+
+    return rule
+
+
+@router.delete("/regex-rules/{rule_id}", status_code=status.HTTP_200_OK)
+def delete_regex_rule(
+    rule_id: int,
+    current_admin: User = Depends(require_role("admin")),
+    service: ClassificationService = Depends(get_classification_service),
+    db: Session = Depends(get_db),
+):
+    """Delete a regex rule and live-reload the in-memory rules list."""
+    rule_repo = SqlRegexRuleRepository(db)
+    audit_repo = SqlAuditLogRepository(db)
+
+    success = rule_repo.delete(rule_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+
+    # Reload active rules from DB into service
+    active_db_rules = rule_repo.list_active()
+    new_rules = []
+    for r in active_db_rules:
+        try:
+            new_rules.append(RegexRule(label=r.label, pattern=re.compile(r.pattern, re.IGNORECASE)))
+        except re.error:
+            pass
+    service.regex_classifier.rules = new_rules or service.regex_classifier._default_rules()
+
+    audit_repo.log(
+        actor_id=current_admin.id,
+        action="RULE_DELETE",
+        target=f"rule:{rule_id}",
+    )
+
+    return {"status": "deleted", "rule_id": rule_id}
+
+
+# --- Model Registry & Hot-Swap ---
+
+@router.get("/models", response_model=list[ModelVersionResponse])
+def list_models(service: ClassificationService = Depends(get_classification_service)):
+    """List registered machine learning models and active status."""
+    registry_path = Path(settings.model_registry_path)
+    models = []
+    is_active_model = service.ml_classifier is not None and service.ml_classifier.classifier is not None
+
+    models.append(
+        ModelVersionResponse(
+            name=settings.embedding_model_name,
+            version="v1.0-current",
+            is_active=is_active_model,
+            description="Logistic Regression head over BERT embeddings",
+        )
+    )
+    if registry_path.exists():
+        for item in registry_path.iterdir():
+            if item.is_dir():
+                models.append(
+                    ModelVersionResponse(
+                        name=f"registry/{item.name}",
+                        version=item.name,
+                        is_active=False,
+                        description=f"Model artifact directory at {item.name}",
+                    )
+                )
+
+    return models
+
+
+@router.post("/models/{version}/activate")
+def activate_model_version(
+    version: str,
+    current_admin: User = Depends(require_role("admin")),
+    service: ClassificationService = Depends(get_classification_service),
+    db: Session = Depends(get_db),
+):
+    """Swap the active machine learning model artifact without server restart."""
+    target_path = Path(settings.model_registry_path) / version
+    if not (target_path / "classifier.joblib").exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model artifact not found at {target_path}",
+        )
+
+    try:
+        service.ml_classifier = MLClassifier.load(target_path, settings.embedding_model_name)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load model: {exc}",
+        )
+
+    audit_repo = SqlAuditLogRepository(db)
+    audit_repo.log(
+        actor_id=current_admin.id,
+        action="MODEL_ACTIVATE",
+        target=f"model:{version}",
+    )
+
+    return {"status": "activated", "version": version}
+
+
+# --- Audit Logs ---
+
+@router.get("/audit-logs")
+def list_audit_logs(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    action: Optional[str] = Query(default=None),
+    actor_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Query system audit trail of admin actions."""
+    audit_repo = SqlAuditLogRepository(db)
+    logs, total = audit_repo.list_logs(skip=skip, limit=limit, action=action, actor_id=actor_id)
+    return {
+        "audit_logs": [AuditLogResponse.model_validate(log) for log in logs],
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+    }
