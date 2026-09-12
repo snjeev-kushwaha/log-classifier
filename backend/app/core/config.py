@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 14
     daily_user_quota: int = 1000
 
+    # --- OAuth2 settings ---
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    oauth_redirect_base_url: str = "http://localhost:8000"
+
     # Requests per minute per client IP, applied to the classification
     # endpoints. Batch CSV uploads get a stricter separate limit below.
     rate_limit_per_minute: int = 60

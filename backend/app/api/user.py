@@ -84,7 +84,7 @@ def create_personal_api_key(
     api_key_repo = SqlApiKeyRepository(db)
     random_part = generate_random_token(32)
     raw_key = f"log_live_{random_part}"
-    prefix = raw_key[:14] + "..."
+    prefix = raw_key[:12] + "..."
     key_hash = hash_token(raw_key)
 
     created_key = api_key_repo.create(

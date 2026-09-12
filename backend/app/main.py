@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
@@ -72,6 +73,7 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+app.add_middleware(SessionMiddleware, secret_key=settings.jwt_secret_key)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin],

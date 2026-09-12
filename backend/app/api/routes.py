@@ -56,8 +56,8 @@ def classify_log(
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
-    # Enforce daily quota if user is authenticated
-    if current_user:
+    # Enforce daily quota if user is authenticated (real user id > 0)
+    if current_user and current_user.id:
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         usage_repo = SqlUsageRepository(db)
         count, within_limit = usage_repo.increment_and_check(current_user.id, today_str, settings.daily_user_quota)
@@ -93,7 +93,7 @@ def classify_log(
         result = service.classify(payload.text, source=payload.source)
 
     record = ClassificationRecord(
-        user_id=current_user.id if current_user else None,
+        user_id=current_user.id if (current_user and current_user.id > 0) else None,
         text=result.text,
         label=result.label,
         confidence=result.confidence,

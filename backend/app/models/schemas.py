@@ -75,6 +75,13 @@ class TokenRefreshRequest(BaseModel):
     refresh_token: str
 
 
+class OAuthLoginRequest(BaseModel):
+    provider: str = Field(..., description="OAuth provider, e.g. google or github")
+    subject_id: str = Field(..., description="Unique user ID from provider")
+    email: EmailStr = Field(..., description="Email address verified by provider")
+    full_name: Optional[str] = Field(default=None, description="Full name from provider")
+
+
 class UserResponse(BaseModel):
     id: int
     email: str
@@ -82,6 +89,7 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     is_verified: bool
+    oauth_provider: Optional[str] = None
     created_at: datetime
 
     class Config:

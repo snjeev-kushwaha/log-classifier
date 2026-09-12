@@ -36,6 +36,13 @@ class SqlUserRepository(IUserRepository):
     def get_by_email(self, email: str) -> Optional[User]:
         return self.db.query(User).filter(func.lower(User.email) == email.lower().strip()).first()
 
+    def get_by_oauth(self, provider: str, subject_id: str) -> Optional[User]:
+        return (
+            self.db.query(User)
+            .filter(User.oauth_provider == provider, User.oauth_subject_id == str(subject_id))
+            .first()
+        )
+
     def create(self, email: str, hashed_password: str, full_name: Optional[str] = None, role: str = "user") -> User:
         user = User(
             email=email.lower().strip(),
@@ -46,6 +53,45 @@ class SqlUserRepository(IUserRepository):
             is_verified=False,
         )
         self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+
+    def create_oauth(
+        self,
+        email: str,
+        provider: str,
+        subject_id: str,
+        full_name: Optional[str] = None,
+        role: str = "user",
+    ) -> User:
+        user = User(
+            email=email.lower().strip(),
+            hashed_password=None,
+            full_name=full_name,
+            role=role,
+            oauth_provider=provider,
+            oauth_subject_id=str(subject_id),
+            is_active=True,
+            is_verified=True,
+        )
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+
+    def link_oauth(
+        self,
+        user: User,
+        provider: str,
+        subject_id: str,
+        full_name: Optional[str] = None,
+    ) -> User:
+        user.oauth_provider = provider
+        user.oauth_subject_id = str(subject_id)
+        user.is_verified = True
+        if full_name and not user.full_name:
+            user.full_name = full_name
         self.db.commit()
         self.db.refresh(user)
         return user

@@ -21,11 +21,13 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(255), nullable=False)
+    hashed_password = Column(String(255), nullable=True)  # Nullable for OAuth users
     full_name = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
     role = Column(String(50), default="user", nullable=False, index=True)
+    oauth_provider = Column(String(50), nullable=True, index=True)
+    oauth_subject_id = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
         DateTime,
@@ -97,7 +99,7 @@ class ApiKey(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     key_hash = Column(String(64), unique=True, index=True, nullable=False)
-    prefix = Column(String(16), nullable=False)
+    prefix = Column(String(32), nullable=False)
     label = Column(String(100), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     last_used_at = Column(DateTime, nullable=True)

@@ -84,25 +84,29 @@ def test_rbac_and_admin_controls(client: TestClient):
         "/api/v1/auth/signup",
         json={"email": "user1@example.com", "password": "password123", "full_name": "Normal User"},
     )
-    user_login = client.post(
-        "/api/v1/auth/login",
-        json={"email": "user1@example.com", "password": "password123"},
-    )
-    user_token = user_login.json()["access_token"]
 
     # Create admin user
     client.post(
         "/api/v1/auth/signup",
         json={"email": "superadmin@example.com", "password": "password123", "full_name": "Super Admin"},
     )
-    # Give superadmin the admin role directly
+
+    # Explicitly set roles to guarantee test isolation
     from app.db.models import User
     from app.db.session import SessionLocal
     db = SessionLocal()
-    u = db.query(User).filter(User.email == "superadmin@example.com").first()
-    u.role = "admin"
+    u1 = db.query(User).filter(User.email == "user1@example.com").first()
+    u1.role = "user"
+    u2 = db.query(User).filter(User.email == "superadmin@example.com").first()
+    u2.role = "admin"
     db.commit()
     db.close()
+
+    user_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "user1@example.com", "password": "password123"},
+    )
+    user_token = user_login.json()["access_token"]
 
     admin_login = client.post(
         "/api/v1/auth/login",

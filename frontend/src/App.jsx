@@ -18,6 +18,25 @@ export default function App() {
   const [activeView, setActiveView] = useState("classifier"); // 'classifier' | 'user' | 'admin'
 
   useEffect(() => {
+    // Check for OAuth tokens or errors passed in URL query parameters
+    const params = new URLSearchParams(window.location.search);
+    const oauthToken = params.get("oauth_token");
+    const oauthRefreshToken = params.get("refresh_token");
+    const oauthError = params.get("oauth_error");
+
+    if (oauthToken && oauthRefreshToken) {
+      handleAuthSuccess({
+        access_token: oauthToken,
+        refresh_token: oauthRefreshToken,
+      });
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (oauthError) {
+      setApiError(`OAuth sign-in failed: ${oauthError}`);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  useEffect(() => {
     if (token) {
       fetchCurrentUser(token)
         .then((userData) => setUser(userData))

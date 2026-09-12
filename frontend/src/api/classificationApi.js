@@ -100,6 +100,20 @@ export async function logoutUser(refresh_token) {
   }).catch(() => {});
 }
 
+export async function oauthTokenLogin({ provider, subject_id, email, fullName }) {
+  const response = await fetch(`${BASE_URL}/auth/oauth/token-login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      provider,
+      subject_id,
+      email,
+      full_name: fullName,
+    }),
+  });
+  return handleResponse(response);
+}
+
 // --- User Platform ---
 
 export async function fetchUserHistory(token, skip = 0, limit = 20) {

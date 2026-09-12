@@ -27,7 +27,32 @@ class IUserRepository(ABC):
         pass
 
     @abstractmethod
+    def get_by_oauth(self, provider: str, subject_id: str) -> Optional[User]:
+        pass
+
+    @abstractmethod
     def create(self, email: str, hashed_password: str, full_name: Optional[str] = None, role: str = "user") -> User:
+        pass
+
+    @abstractmethod
+    def create_oauth(
+        self,
+        email: str,
+        provider: str,
+        subject_id: str,
+        full_name: Optional[str] = None,
+        role: str = "user",
+    ) -> User:
+        pass
+
+    @abstractmethod
+    def link_oauth(
+        self,
+        user: User,
+        provider: str,
+        subject_id: str,
+        full_name: Optional[str] = None,
+    ) -> User:
         pass
 
     @abstractmethod

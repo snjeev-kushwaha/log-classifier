@@ -79,7 +79,22 @@ def client(_test_db_url, trained_ml_classifier, mock_llm_classifier):
 
     # Isolate tests from each other without tearing down the shared engine.
     db = SessionLocal()
+    from app.db.models import (
+        ApiKey,
+        AuditLog,
+        ClassificationRecord,
+        DbRegexRule,
+        RefreshToken,
+        UsageCounter,
+        User,
+    )
     db.query(ClassificationRecord).delete()
+    db.query(UsageCounter).delete()
+    db.query(ApiKey).delete()
+    db.query(RefreshToken).delete()
+    db.query(AuditLog).delete()
+    db.query(DbRegexRule).delete()
+    db.query(User).delete()
     db.commit()
     db.close()
     app.dependency_overrides.clear()

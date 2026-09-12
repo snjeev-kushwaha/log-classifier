@@ -56,6 +56,17 @@ The classification pipeline processes incoming logs through three distinct layer
 
 ---
 
+## Authentication & Identity Architecture
+
+* **Multi-Scheme Authentication**: Supports JWT Bearer tokens with cryptographically secure rotatable refresh tokens and replay protection, granular personal API keys, and OAuth2 authorization-code flows.
+* **Role-Based Access Control (RBAC)**: Enforces distinct access tiers separating standard user classification operations from administrative control plane endpoints.
+* **OAuth2 Social Login & Account Linking**: Integrates Google and GitHub social authentication with an explicit account-linking policy:
+  * Existing email+password users logging in with verified provider emails are linked automatically without creating duplicate user records.
+  * Existing hashed passwords and assigned roles remain intact, allowing continued access via both password and social logins.
+  * New social login users are initialized with verified email status and no password requirement.
+
+---
+
 ## Production Deployment Considerations
 
 * **Environment & Security**: Set `ENVIRONMENT=production` and configure `API_KEYS` to enforce authentication across all operational endpoints.
