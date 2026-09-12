@@ -42,3 +42,53 @@ def get_classification_service() -> ClassificationService:
         llm_fallback_confidence_threshold=settings.llm_fallback_confidence_threshold,
         llm_only_sources=settings.llm_only_sources_set,
     )
+
+
+# --- PostgreSQL Repository Dependency Wiring ---
+# Provides PostgreSQL repository instances satisfying abstract repository interfaces.
+
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from app.db.session import get_db
+from app.repositories.base import (
+    IApiKeyRepository,
+    IAuditLogRepository,
+    IRefreshTokenRepository,
+    IRegexRuleRepository,
+    IUsageRepository,
+    IUserRepository,
+)
+from app.repositories.postgres import (
+    SqlApiKeyRepository,
+    SqlAuditLogRepository,
+    SqlRefreshTokenRepository,
+    SqlRegexRuleRepository,
+    SqlUsageRepository,
+    SqlUserRepository,
+)
+
+
+def get_user_repository(db: Session = Depends(get_db)) -> IUserRepository:
+    """Provides the active User repository. Currently wired to PostgreSQL."""
+    return SqlUserRepository(db)
+
+
+def get_refresh_token_repository(db: Session = Depends(get_db)) -> IRefreshTokenRepository:
+    return SqlRefreshTokenRepository(db)
+
+
+def get_audit_log_repository(db: Session = Depends(get_db)) -> IAuditLogRepository:
+    return SqlAuditLogRepository(db)
+
+
+def get_api_key_repository(db: Session = Depends(get_db)) -> IApiKeyRepository:
+    return SqlApiKeyRepository(db)
+
+
+def get_usage_repository(db: Session = Depends(get_db)) -> IUsageRepository:
+    return SqlUsageRepository(db)
+
+
+def get_regex_rule_repository(db: Session = Depends(get_db)) -> IRegexRuleRepository:
+    return SqlRegexRuleRepository(db)
+

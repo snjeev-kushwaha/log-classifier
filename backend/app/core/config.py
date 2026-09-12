@@ -2,6 +2,7 @@
 Central configuration for the hybrid log classification service.
 All values are overridable via environment variables (.env file supported).
 """
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,10 +41,12 @@ class Settings(BaseSettings):
     # Comma-separated list of accepted static API keys.
     api_keys: str = ""
     jwt_secret_key: str = "dev-jwt-secret-key-super-secure-change-in-production-1234567890"
+    jwt_secret_key_previous: Optional[str] = None
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 14
     daily_user_quota: int = 1000
+    secrets_manager_backend: str = "vault_or_env"
 
     # --- OAuth2 settings ---
     google_client_id: str = ""

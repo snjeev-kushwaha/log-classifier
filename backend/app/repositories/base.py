@@ -1,6 +1,6 @@
 """
-Repository interfaces for database access abstraction.
-Allows swapping backend storage engines (e.g. Postgres vs Mongo) without touching services.
+Repository interfaces for clean database access abstraction.
+Implements the repository pattern across PostgreSQL models and services.
 """
 from abc import ABC, abstractmethod
 from datetime import datetime

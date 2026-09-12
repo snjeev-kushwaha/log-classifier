@@ -210,3 +210,26 @@ export async function adminListAuditLogs(token, skip = 0, limit = 50) {
   });
   return handleResponse(response);
 }
+
+export async function adminGetSecretsStatus(token) {
+  const response = await fetch(`${BASE_URL}/admin/secrets/status`, {
+    headers: getAuthHeaders(token),
+  });
+  return handleResponse(response);
+}
+
+export async function adminRotateJwtSecret(token) {
+  const response = await fetch(`${BASE_URL}/admin/secrets/rotate-jwt`, {
+    method: "POST",
+    headers: getAuthHeaders(token),
+  });
+  return handleResponse(response);
+}
+
+export async function adminGetDatabaseStatus(token) {
+  const response = await fetch(`${BASE_URL}/admin/database/status`, {
+    headers: getAuthHeaders(token),
+  });
+  return handleResponse(response);
+}
+

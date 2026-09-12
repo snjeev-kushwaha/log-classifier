@@ -7,6 +7,9 @@ import {
   adminCreateRegexRule,
   adminDeleteRegexRule,
   adminListAuditLogs,
+  adminGetSecretsStatus,
+  adminRotateJwtSecret,
+  adminGetDatabaseStatus,
 } from "../api/classificationApi.js";
 
 export default function AdminControlCenter({ token }) {
@@ -15,6 +18,9 @@ export default function AdminControlCenter({ token }) {
   const [telemetry, setTelemetry] = useState(null);
   const [rules, setRules] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [secretsStatus, setSecretsStatus] = useState(null);
+  const [dbStatus, setDbStatus] = useState(null);
+  const [secretMsg, setSecretMsg] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [newPattern, setNewPattern] = useState("");
   const [newDesc, setNewDesc] = useState("");
@@ -41,6 +47,13 @@ export default function AdminControlCenter({ token }) {
       } else if (section === "audit") {
         const data = await adminListAuditLogs(token);
         setAuditLogs(data.audit_logs || []);
+      } else if (section === "infrastructure") {
+        const [secData, databaseData] = await Promise.all([
+          adminGetSecretsStatus(token),
+          adminGetDatabaseStatus(token),
+        ]);
+        setSecretsStatus(secData);
+        setDbStatus(databaseData);
       }
     } catch (err) {
       setError(err.message || "Failed to load admin data");
@@ -48,6 +61,20 @@ export default function AdminControlCenter({ token }) {
       setLoading(false);
     }
   }
+
+  async function handleRotateSecret() {
+    if (!window.confirm("Rotate active JWT signing key? Server-side refresh tokens will preserve active user sessions.")) return;
+    setError("");
+    setSecretMsg("");
+    try {
+      const res = await adminRotateJwtSecret(token);
+      setSecretMsg(res.message);
+      setSecretsStatus(res.secrets_status);
+    } catch (err) {
+      setError(err.message || "Failed to rotate secret");
+    }
+  }
+
 
   async function handleToggleUserRole(u) {
     const newRole = u.role === "admin" ? "user" : "admin";
@@ -115,6 +142,9 @@ export default function AdminControlCenter({ token }) {
         </button>
         <button onClick={() => setSection("audit")} style={section === "audit" ? tabActive : tabInactive}>
           Audit Trail
+        </button>
+        <button onClick={() => setSection("infrastructure")} style={section === "infrastructure" ? tabActive : tabInactive}>
+          Secrets & Database
         </button>
       </div>
 
@@ -338,6 +368,89 @@ export default function AdminControlCenter({ token }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Infrastructure Tab (Secrets & Postgres) */}
+      {section === "infrastructure" && !loading && (
+        <div>
+          {secretMsg && (
+            <div style={{ backgroundColor: "#e8f5e9", color: "#2e7d32", padding: "10px 14px", borderRadius: "6px", marginBottom: "16px", fontWeight: "500" }}>
+              ✓ {secretMsg}
+            </div>
+          )}
+
+          {/* Database Architecture Section */}
+          <div style={{ backgroundColor: "#fafafa", border: "1px solid #e0e0e0", borderRadius: "8px", padding: "18px", marginBottom: "20px" }}>
+            <h4 style={{ margin: "0 0 12px 0", display: "flex", alignItems: "center", gap: "8px" }}>
+              🐘 Database Architecture & Status
+            </h4>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "12px" }}>
+              <div style={statCard}>
+                <div style={{ fontSize: "1.05rem", fontWeight: "700", color: "#1565c0" }}>PostgreSQL</div>
+                <div style={statLabel}>Primary Database Engine</div>
+              </div>
+              <div style={statCard}>
+                <div style={{ fontSize: "1.05rem", fontWeight: "700", color: "#2e7d32" }}>Connected</div>
+                <div style={statLabel}>Single Unified Database</div>
+              </div>
+              <div style={statCard}>
+                <div style={statNum}>{dbStatus?.metrics?.total_users || 0}</div>
+                <div style={statLabel}>Total User Accounts</div>
+              </div>
+              <div style={statCard}>
+                <div style={statNum}>{dbStatus?.metrics?.total_classification_records || 0}</div>
+                <div style={statLabel}>Classification Records</div>
+              </div>
+            </div>
+            <p style={{ margin: 0, fontSize: "0.85rem", color: "#555" }}>
+              <strong>Foreign Key Integrity:</strong> Strictly enforced across users, refresh tokens, personal API keys, and classification records within a single unified PostgreSQL cluster.
+            </p>
+          </div>
+
+          {/* Secrets Management & Key Rotation Section */}
+          <div style={{ backgroundColor: "#fafafa", border: "1px solid #e0e0e0", borderRadius: "8px", padding: "18px" }}>
+            <h4 style={{ margin: "0 0 12px 0", display: "flex", alignItems: "center", gap: "8px" }}>
+              🔐 Secrets Manager & Key Rotation
+            </h4>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "14px", marginBottom: "16px" }}>
+              <div style={statCard}>
+                <div style={{ fontSize: "1rem", fontWeight: "700" }}>{secretsStatus?.backend || "Vault/Env"}</div>
+                <div style={statLabel}>Secrets Manager Provider</div>
+              </div>
+              <div style={statCard}>
+                <div style={{ fontSize: "1rem", fontWeight: "700", fontFamily: "monospace" }}>
+                  {secretsStatus?.jwt_current_hash_preview ? `${secretsStatus.jwt_current_hash_preview}...` : "Active"}
+                </div>
+                <div style={statLabel}>Active JWT Key Hash</div>
+              </div>
+              <div style={statCard}>
+                <div style={{ fontSize: "1rem", fontWeight: "700", color: secretsStatus?.jwt_previous_retained ? "#2e7d32" : "#757575" }}>
+                  {secretsStatus?.jwt_previous_retained ? "Retained (Grace Period)" : "None"}
+                </div>
+                <div style={statLabel}>Previous Key Status</div>
+              </div>
+              <div style={statCard}>
+                <div style={statNum}>{secretsStatus?.rotation_count || 0}</div>
+                <div style={statLabel}>Total Key Rotations</div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", padding: "14px", borderRadius: "6px", border: "1px solid #e0e0e0" }}>
+              <div>
+                <strong style={{ display: "block", marginBottom: "4px" }}>Rotate JWT Signing Key</strong>
+                <span style={{ fontSize: "0.85rem", color: "#666" }}>
+                  Seamless rotation: Because refresh tokens are stored server-side in PostgreSQL, active users remain logged in without interruption.
+                </span>
+              </div>
+              <button
+                onClick={handleRotateSecret}
+                style={{ backgroundColor: "#d32f2f", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "6px", fontWeight: "600", cursor: "pointer" }}
+              >
+                Rotate Secret Now
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

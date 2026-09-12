@@ -312,3 +312,71 @@ def list_audit_logs(
         "skip": skip,
         "limit": limit,
     }
+
+
+# --- Secrets Management & Secret Rotation ---
+
+@router.get("/secrets/status")
+def get_secrets_status():
+    """Returns metadata about the active secrets provider and rotation history."""
+    from app.core.secrets import secrets_manager
+    return secrets_manager.get_status()
+
+
+@router.post("/secrets/rotate-jwt")
+def rotate_jwt_secret(
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """
+    Rotates the active JWT signing key.
+    Moves current secret to previous secret to allow existing unexpired tokens to remain valid.
+    Because refresh tokens are stored server-side in PostgreSQL, rotating the secret does NOT
+    force users to re-login: expiring access tokens smoothly refresh via /auth/refresh.
+    """
+    from app.core.secrets import secrets_manager
+    new_secret, old_secret = secrets_manager.rotate_secret("JWT_SECRET_KEY")
+
+    audit_repo = SqlAuditLogRepository(db)
+    audit_repo.log(
+        actor_id=current_admin.id,
+        action="JWT_SECRET_ROTATED",
+        target="secrets:JWT_SECRET_KEY",
+        metadata={
+            "has_previous_secret": old_secret is not None,
+            "rotated_by": current_admin.email,
+        },
+    )
+
+    return {
+        "status": "rotated",
+        "message": "JWT secret successfully rotated. Client sessions remain uninterrupted.",
+        "secrets_status": secrets_manager.get_status(),
+    }
+
+
+# --- Database Status ---
+
+@router.get("/database/status")
+def get_database_status(db: Session = Depends(get_db)):
+    """
+    Returns PostgreSQL database metrics and operational status.
+    Uses PostgreSQL exclusively as the single unified database for the entire application.
+    """
+    total_users = db.query(User).count()
+    total_records = db.query(ClassificationRecord).count()
+    total_logs = db.query(AuditLog).count()
+
+    return {
+        "database": "PostgreSQL",
+        "architecture": "Single Unified Relational Database",
+        "status": "connected",
+        "metrics": {
+            "total_users": total_users,
+            "total_classification_records": total_records,
+            "total_audit_logs": total_logs,
+        },
+        "foreign_key_integrity": "Enforced natively via PostgreSQL DDL",
+    }
+
+
