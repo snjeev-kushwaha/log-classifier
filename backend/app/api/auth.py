@@ -19,10 +19,14 @@ from app.core.security import (
     hash_token,
     verify_password,
 )
+from app.core.metrics import metrics_collector
 from app.db.models import User
 from app.db.session import get_db
 from app.models.schemas import (
+    EmailVerificationConfirm,
     OAuthLoginRequest,
+    PasswordResetConfirm,
+    PasswordResetRequest,
     TokenRefreshRequest,
     TokenResponse,
     UserLoginRequest,
@@ -33,7 +37,9 @@ from app.repositories.postgres import (
     SqlAuditLogRepository,
     SqlRefreshTokenRepository,
     SqlUserRepository,
+    SqlVerificationTokenRepository,
 )
+from app.services.email import email_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -60,6 +66,16 @@ def signup(request: UserSignupRequest, db: Session = Depends(get_db)):
         full_name=request.full_name,
         role=role,
     )
+
+    # Issue email verification token
+    verify_repo = SqlVerificationTokenRepository(db)
+    raw_token = generate_random_token(32)
+    token_hash_str = hash_token(raw_token)
+    exp = datetime.now(timezone.utc) + timedelta(hours=settings.verification_token_expire_hours)
+    verify_repo.create(user_id=user.id, token_hash=token_hash_str, token_type="verify_email", expires_at=exp)
+    email_service.send_verification_email(user.email, raw_token)
+
+    metrics_collector.record_auth_event("signup", "success", role=role)
     logger.info("User registered successfully", extra={"user_id": user.id, "email": user.email, "role": role})
     return user
 
@@ -171,18 +187,21 @@ def login(request: UserLoginRequest, req_meta: Request, db: Session = Depends(ge
 
     user = user_repo.get_by_email(request.email)
     if not user or not user.hashed_password or not verify_password(request.password, user.hashed_password):
+        metrics_collector.record_auth_event("login", "failure", role="anonymous")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
     if not user.is_active:
+        metrics_collector.record_auth_event("login", "failure", role=user.role)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated. Contact an administrator.",
         )
 
     client_ip = req_meta.client.host if req_meta.client else None
+    metrics_collector.record_auth_event("login", "success", role=user.role)
     return issue_tokens_for_user(user, client_ip, db)
 
 
@@ -251,6 +270,7 @@ def refresh_token(request: TokenRefreshRequest, req_meta: Request, db: Session =
         ip=client_ip,
     )
 
+    metrics_collector.record_auth_event("refresh", "success", role=user.role)
     return TokenResponse(
         access_token=new_access_token,
         refresh_token=new_raw_refresh_token,
@@ -382,6 +402,107 @@ async def oauth_callback(provider: str, request: Request, db: Session = Depends(
         return RedirectResponse(
             url=f"{settings.frontend_origin.rstrip('/')}?oauth_error={str(exc)}"
         )
+
+
+@router.post("/verify-email/request", status_code=status.HTTP_200_OK)
+def request_email_verification(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate and send a new email verification token to the authenticated user."""
+    if current_user.is_verified:
+        return {"status": "already_verified", "message": "Email is already verified."}
+
+    verify_repo = SqlVerificationTokenRepository(db)
+    raw_token = generate_random_token(32)
+    token_hash_str = hash_token(raw_token)
+    exp = datetime.now(timezone.utc) + timedelta(hours=settings.verification_token_expire_hours)
+    verify_repo.create(user_id=current_user.id, token_hash=token_hash_str, token_type="verify_email", expires_at=exp)
+    email_service.send_verification_email(current_user.email, raw_token)
+
+    return {"status": "sent", "message": "Verification link sent to your registered email address."}
+
+
+@router.post("/verify-email/confirm", status_code=status.HTTP_200_OK)
+def confirm_email_verification(
+    payload: EmailVerificationConfirm,
+    db: Session = Depends(get_db),
+):
+    """Verify an email address using the one-time token received via email."""
+    verify_repo = SqlVerificationTokenRepository(db)
+    user_repo = SqlUserRepository(db)
+
+    token_hash_str = hash_token(payload.token)
+    token = verify_repo.get_active(token_hash_str, "verify_email")
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid, expired, or already used verification token.",
+        )
+
+    user = user_repo.get_by_id(token.user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    user_repo.update(user, is_verified=True)
+    verify_repo.mark_used(token)
+    metrics_collector.record_auth_event("verify_email", "success", role=user.role)
+    logger.info("Email verified successfully for user_id=%s (%s)", user.id, user.email)
+    return {"status": "verified", "message": "Your email address has been verified successfully."}
+
+
+@router.post("/password-reset/request", status_code=status.HTTP_200_OK)
+def request_password_reset(
+    payload: PasswordResetRequest,
+    db: Session = Depends(get_db),
+):
+    """Initiate a password reset flow. Sends a reset link if the user exists."""
+    user_repo = SqlUserRepository(db)
+    verify_repo = SqlVerificationTokenRepository(db)
+
+    user = user_repo.get_by_email(payload.email)
+    if user and user.is_active:
+        raw_token = generate_random_token(32)
+        token_hash_str = hash_token(raw_token)
+        exp = datetime.now(timezone.utc) + timedelta(hours=settings.password_reset_token_expire_hours)
+        verify_repo.create(user_id=user.id, token_hash=token_hash_str, token_type="password_reset", expires_at=exp)
+        email_service.send_password_reset_email(user.email, raw_token)
+
+    # Standard security practice: always return 200 to prevent email enumeration
+    return {"status": "sent", "message": "If an account with that email exists, a password reset link has been sent."}
+
+
+@router.post("/password-reset/confirm", status_code=status.HTTP_200_OK)
+def confirm_password_reset(
+    payload: PasswordResetConfirm,
+    db: Session = Depends(get_db),
+):
+    """Reset password using the reset token and invalidate all existing refresh tokens."""
+    verify_repo = SqlVerificationTokenRepository(db)
+    user_repo = SqlUserRepository(db)
+    refresh_repo = SqlRefreshTokenRepository(db)
+
+    token_hash_str = hash_token(payload.token)
+    token = verify_repo.get_active(token_hash_str, "password_reset")
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid, expired, or already used password reset token.",
+        )
+
+    user = user_repo.get_by_id(token.user_id)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found or deactivated.")
+
+    new_hash = hash_password(payload.new_password)
+    user_repo.update(user, hashed_password=new_hash)
+    verify_repo.mark_used(token)
+    # Revoke all active sessions upon password reset
+    refresh_repo.revoke_all_for_user(user.id)
+
+    metrics_collector.record_auth_event("reset_password", "success", role=user.role)
+    logger.info("Password successfully reset for user_id=%s (%s). All active sessions revoked.", user.id, user.email)
+    return {"status": "password_reset", "message": "Password reset successful. Please log in with your new password."}
 
 
 

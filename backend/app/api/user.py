@@ -22,7 +22,12 @@ from app.models.schemas import (
     ClassificationHistoryItem,
     UsageQuotaResponse,
 )
-from app.repositories.postgres import SqlApiKeyRepository, SqlUsageRepository
+from app.repositories.postgres import (
+    SqlApiKeyRepository,
+    SqlSubscriptionRepository,
+    SqlUsageRepository,
+)
+from app.services.billing import get_tier_daily_quota
 
 router = APIRouter(tags=["user-platform"])
 
@@ -61,15 +66,19 @@ def get_user_quota(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Check remaining daily classification quota for the authenticated user."""
+    """Check remaining daily classification quota for the authenticated user based on their active plan tier."""
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    sub_repo = SqlSubscriptionRepository(db)
+    user_sub = sub_repo.get_by_user_id(current_user.id)
+    daily_limit = get_tier_daily_quota(user_sub.plan_tier if (user_sub and user_sub.status == "active") else "free")
+
     usage_repo = SqlUsageRepository(db)
     today_count = usage_repo.get_today_count(current_user.id, today_str)
-    remaining = max(0, settings.daily_user_quota - today_count)
+    remaining = max(0, daily_limit - today_count)
 
     return UsageQuotaResponse(
         today_count=today_count,
-        daily_limit=settings.daily_user_quota,
+        daily_limit=daily_limit,
         remaining=remaining,
     )
 

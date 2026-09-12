@@ -11,9 +11,12 @@ from app.db.models import (
     AuditLog,
     ClassificationRecord,
     DbRegexRule,
+    Notification,
     RefreshToken,
+    Subscription,
     UsageCounter,
     User,
+    VerificationToken,
 )
 
 
@@ -136,4 +139,55 @@ class IUsageRepository(ABC):
 
     @abstractmethod
     def get_today_count(self, user_id: int, date_str: str) -> int:
+        pass
+
+
+class IVerificationTokenRepository(ABC):
+    @abstractmethod
+    def create(self, user_id: int, token_hash: str, token_type: str, expires_at: datetime) -> VerificationToken:
+        pass
+
+    @abstractmethod
+    def get_active(self, token_hash: str, token_type: str) -> Optional[VerificationToken]:
+        pass
+
+    @abstractmethod
+    def mark_used(self, token: VerificationToken) -> None:
+        pass
+
+
+class INotificationRepository(ABC):
+    @abstractmethod
+    def create(self, user_id: int, title: str, message: str, type: str = "system") -> Notification:
+        pass
+
+    @abstractmethod
+    def list_for_user(self, user_id: int, skip: int = 0, limit: int = 50) -> tuple[list[Notification], int, int]:
+        """Returns (notifications, total, unread_count)."""
+        pass
+
+    @abstractmethod
+    def mark_read(self, user_id: int, notification_id: int) -> bool:
+        pass
+
+    @abstractmethod
+    def mark_all_read(self, user_id: int) -> int:
+        pass
+
+
+class ISubscriptionRepository(ABC):
+    @abstractmethod
+    def get_by_user_id(self, user_id: int) -> Optional[Subscription]:
+        pass
+
+    @abstractmethod
+    def create_or_update(
+        self,
+        user_id: int,
+        plan_tier: str,
+        status: str = "active",
+        stripe_customer_id: Optional[str] = None,
+        stripe_subscription_id: Optional[str] = None,
+        current_period_end: Optional[datetime] = None,
+    ) -> Subscription:
         pass

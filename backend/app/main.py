@@ -14,8 +14,11 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.api.account import router as account_router
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
+from app.api.billing import router as billing_router
+from app.api.notifications import router as notifications_router
 from app.api.rate_limit import limiter
 from app.api.routes import router as routes_router
 from app.api.user import router as user_router
@@ -120,6 +123,9 @@ app.include_router(routes_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
+app.include_router(notifications_router, prefix="/api/v1")
+app.include_router(billing_router, prefix="/api/v1")
+app.include_router(account_router, prefix="/api/v1")
 
 # Exposes GET /metrics in Prometheus text format: request counts, latency
 # histograms, and in-progress requests, broken down by path and status code.

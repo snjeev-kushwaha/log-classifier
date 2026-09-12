@@ -12,17 +12,23 @@ from app.db.models import (
     ApiKey,
     AuditLog,
     DbRegexRule,
+    Notification,
     RefreshToken,
+    Subscription,
     UsageCounter,
     User,
+    VerificationToken,
 )
 from app.repositories.base import (
     IApiKeyRepository,
     IAuditLogRepository,
+    INotificationRepository,
     IRefreshTokenRepository,
     IRegexRuleRepository,
+    ISubscriptionRepository,
     IUsageRepository,
     IUserRepository,
+    IVerificationTokenRepository,
 )
 
 
@@ -286,3 +292,124 @@ class SqlUsageRepository(IUsageRepository):
             UsageCounter.date == date_str,
         ).first()
         return counter.count if counter else 0
+
+
+class SqlVerificationTokenRepository(IVerificationTokenRepository):
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create(self, user_id: int, token_hash: str, token_type: str, expires_at: datetime) -> VerificationToken:
+        token = VerificationToken(
+            user_id=user_id,
+            token_hash=token_hash,
+            token_type=token_type,
+            expires_at=expires_at,
+        )
+        self.db.add(token)
+        self.db.commit()
+        self.db.refresh(token)
+        return token
+
+    def get_active(self, token_hash: str, token_type: str) -> Optional[VerificationToken]:
+        now = datetime.now(timezone.utc)
+        return (
+            self.db.query(VerificationToken)
+            .filter(
+                VerificationToken.token_hash == token_hash,
+                VerificationToken.token_type == token_type,
+                VerificationToken.used_at.is_(None),
+                VerificationToken.expires_at > now,
+            )
+            .first()
+        )
+
+    def mark_used(self, token: VerificationToken) -> None:
+        token.used_at = datetime.now(timezone.utc)
+        self.db.commit()
+
+
+class SqlNotificationRepository(INotificationRepository):
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create(self, user_id: int, title: str, message: str, type: str = "system") -> Notification:
+        notification = Notification(
+            user_id=user_id,
+            title=title,
+            message=message,
+            type=type,
+            is_read=False,
+        )
+        self.db.add(notification)
+        self.db.commit()
+        self.db.refresh(notification)
+        return notification
+
+    def list_for_user(self, user_id: int, skip: int = 0, limit: int = 50) -> tuple[list[Notification], int, int]:
+        q = self.db.query(Notification).filter(Notification.user_id == user_id)
+        total = q.count()
+        unread_count = q.filter(Notification.is_read == False).count()
+        items = q.order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
+        return items, total, unread_count
+
+    def mark_read(self, user_id: int, notification_id: int) -> bool:
+        notification = (
+            self.db.query(Notification)
+            .filter(Notification.id == notification_id, Notification.user_id == user_id)
+            .first()
+        )
+        if not notification:
+            return False
+        notification.is_read = True
+        self.db.commit()
+        return True
+
+    def mark_all_read(self, user_id: int) -> int:
+        count = (
+            self.db.query(Notification)
+            .filter(Notification.user_id == user_id, Notification.is_read == False)
+            .update({"is_read": True})
+        )
+        self.db.commit()
+        return count
+
+
+class SqlSubscriptionRepository(ISubscriptionRepository):
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_by_user_id(self, user_id: int) -> Optional[Subscription]:
+        return self.db.query(Subscription).filter(Subscription.user_id == user_id).first()
+
+    def create_or_update(
+        self,
+        user_id: int,
+        plan_tier: str,
+        status: str = "active",
+        stripe_customer_id: Optional[str] = None,
+        stripe_subscription_id: Optional[str] = None,
+        current_period_end: Optional[datetime] = None,
+    ) -> Subscription:
+        sub = self.get_by_user_id(user_id)
+        if not sub:
+            sub = Subscription(
+                user_id=user_id,
+                plan_tier=plan_tier,
+                status=status,
+                stripe_customer_id=stripe_customer_id,
+                stripe_subscription_id=stripe_subscription_id,
+                current_period_end=current_period_end,
+            )
+            self.db.add(sub)
+        else:
+            sub.plan_tier = plan_tier
+            sub.status = status
+            if stripe_customer_id is not None:
+                sub.stripe_customer_id = stripe_customer_id
+            if stripe_subscription_id is not None:
+                sub.stripe_subscription_id = stripe_subscription_id
+            if current_period_end is not None:
+                sub.current_period_end = current_period_end
+        self.db.commit()
+        self.db.refresh(sub)
+        return sub

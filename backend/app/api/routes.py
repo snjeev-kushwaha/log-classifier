@@ -12,9 +12,10 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_classification_service
 from app.api.rate_limit import limiter
-from app.api.security import require_api_key
+from app.api.security import get_optional_current_user, require_api_key
 from app.core.config import settings
-from app.db.models import ClassificationRecord, User
+from app.core.metrics import metrics_collector
+from app.db.models import ClassificationRecord, Notification, Subscription, User
 from app.db.session import get_db
 from app.models.schemas import (
     ClassificationMethod,
@@ -23,7 +24,16 @@ from app.models.schemas import (
     HealthResponse,
     LogClassifyRequest,
 )
+from app.repositories.postgres import (
+    SqlNotificationRepository,
+    SqlRegexRuleRepository,
+    SqlSubscriptionRepository,
+    SqlUsageRepository,
+)
+from app.services.billing import get_tier_daily_quota
 from app.services.classification_service import ClassificationService
+import re
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,11 +52,6 @@ def health(service: ClassificationService = Depends(get_classification_service))
     )
 
 
-from datetime import datetime, timezone
-from app.api.security import get_optional_current_user, require_api_key
-from app.repositories.postgres import SqlUsageRepository
-
-
 @router.post("/classify", response_model=ClassificationResult, dependencies=[Depends(require_api_key)])
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 def classify_log(
@@ -56,20 +61,45 @@ def classify_log(
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
+    user_tier = "free"
+    effective_quota = settings.daily_user_quota
+
     # Enforce daily quota if user is authenticated (real user id > 0)
-    if current_user and current_user.id:
+    if current_user and current_user.id and current_user.id > 0:
+        sub_repo = SqlSubscriptionRepository(db)
+        user_sub = sub_repo.get_by_user_id(current_user.id)
+        if user_sub and user_sub.status == "active":
+            user_tier = user_sub.plan_tier
+            effective_quota = get_tier_daily_quota(user_tier)
+
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         usage_repo = SqlUsageRepository(db)
-        count, within_limit = usage_repo.increment_and_check(current_user.id, today_str, settings.daily_user_quota)
+        count, within_limit = usage_repo.increment_and_check(current_user.id, today_str, effective_quota)
         if not within_limit:
             raise HTTPException(
                 status_code=429,
-                detail=f"Daily usage quota exceeded ({settings.daily_user_quota} classifications/day).",
+                detail=f"Daily usage quota exceeded ({effective_quota} classifications/day for {user_tier.upper()} plan).",
             )
 
+        # In-app quota warning notification when reaching >= 80%
+        if count >= int(effective_quota * 0.8):
+            notif_repo = SqlNotificationRepository(db)
+            existing_warning = (
+                db.query(Notification)
+                .filter(Notification.user_id == current_user.id, Notification.type == "quota_warning")
+                .order_by(Notification.created_at.desc())
+                .first()
+            )
+            if not existing_warning or existing_warning.created_at.strftime("%Y-%m-%d") != today_str:
+                pct = int((count / effective_quota) * 100)
+                notif_repo.create(
+                    user_id=current_user.id,
+                    title="Daily Quota Warning",
+                    message=f"You have used {count} of {effective_quota} daily classifications ({pct}%). Consider upgrading your plan if you need more capacity.",
+                    type="quota_warning",
+                )
+
     # Check dynamic DB regex rules first if any exist
-    from app.repositories.postgres import SqlRegexRuleRepository
-    import re
     rule_repo = SqlRegexRuleRepository(db)
     active_rules = rule_repo.list_active()
     dynamic_match_label = None
@@ -102,6 +132,9 @@ def classify_log(
     )
     db.add(record)
     db.commit()
+
+    metrics_collector.record_classification(user_tier, result.method_used.value)
+    metrics_collector.record_request(current_user.role if current_user else "anonymous", "/classify", 200)
 
     return result
 
@@ -186,6 +219,15 @@ async def classify_batch(
     if records_to_persist:
         db.bulk_save_objects(records_to_persist)
         db.commit()
+
+    if current_user and current_user.id and current_user.id > 0:
+        notif_repo = SqlNotificationRepository(db)
+        notif_repo.create(
+            user_id=current_user.id,
+            title="Batch Processing Completed",
+            message=f"Successfully classified {len(rows)} log entries from {file.filename or 'uploaded CSV'}.",
+            type="batch_completed",
+        )
 
     output_buffer.seek(0)
     logger.info("Batch classified %s rows from %s", len(rows), file.filename)

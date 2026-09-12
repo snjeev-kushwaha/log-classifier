@@ -61,6 +61,21 @@ class Settings(BaseSettings):
     batch_rate_limit_per_minute: int = 5
     max_batch_rows: int = 5000
 
+    # --- Billing & Stripe settings ---
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_pro: str = "price_pro_default"
+    stripe_price_enterprise: str = "price_enterprise_default"
+
+    # --- Email & Verification settings ---
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    email_from: str = "noreply@logclassifier.io"
+    verification_token_expire_hours: int = 24
+    password_reset_token_expire_hours: int = 2
+
     # --- Observability ---
     log_level: str = "INFO"
     json_logs: bool = True

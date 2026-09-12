@@ -67,10 +67,20 @@ The classification pipeline processes incoming logs through three distinct layer
 
 ---
 
+## Product Hardening, Billing & Compliance
+
+* **Email Verification & Self-Service Password Recovery**: Secure tokenized verification and recovery workflows with automatic session revocation on credential resets.
+* **Tiered Subscriptions & Stripe Billing**: Tiered rate limits and daily classification quotas (Community Free, Professional, Enterprise) backed by Stripe webhooks and server-side quota reconciliation.
+* **Contextual Notifications**: Automated in-app delivery for completed batch operations and proactive daily quota threshold alerts.
+* **GDPR Compliance**: Full support for European Union data privacy requirements, including structured personal data portability and irreversible right-to-erasure account purging.
+* **Granular Observability**: Metrics broken down by user role and subscription tier, complemented by Grafana dashboard templates for infrastructure visibility.
+
+---
+
 ## Production Deployment Considerations
 
 * **Environment & Security**: Set `ENVIRONMENT=production` and configure `API_KEYS` to enforce authentication across all operational endpoints.
-* **Database**: Transition from local SQLite to a dedicated PostgreSQL instance.
+* **Database**: Dedicated PostgreSQL instance managing unified transactional state, relational integrity, and server-side sessions.
 * **Source Routing**: Populate `LLM_ONLY_SOURCES` for systems lacking structured formats.
 * **Monitoring & Alerts**: Ingest Prometheus metrics to monitor classification layer distribution; an unexpected spike in LLM fallback indicates regex/ML drift.
 * **Network & TLS**: Place behind a reverse proxy or API gateway (such as Nginx, Cloudflare, or AWS ALB) for TLS termination.

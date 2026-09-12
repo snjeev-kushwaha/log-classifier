@@ -10,6 +10,7 @@ import {
   adminGetSecretsStatus,
   adminRotateJwtSecret,
   adminGetDatabaseStatus,
+  adminGetObservabilityStats,
 } from "../api/classificationApi.js";
 
 export default function AdminControlCenter({ token }) {
@@ -20,6 +21,7 @@ export default function AdminControlCenter({ token }) {
   const [auditLogs, setAuditLogs] = useState([]);
   const [secretsStatus, setSecretsStatus] = useState(null);
   const [dbStatus, setDbStatus] = useState(null);
+  const [obsStats, setObsStats] = useState(null);
   const [secretMsg, setSecretMsg] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [newPattern, setNewPattern] = useState("");
@@ -54,6 +56,9 @@ export default function AdminControlCenter({ token }) {
         ]);
         setSecretsStatus(secData);
         setDbStatus(databaseData);
+      } else if (section === "observability") {
+        const stats = await adminGetObservabilityStats(token);
+        setObsStats(stats);
       }
     } catch (err) {
       setError(err.message || "Failed to load admin data");
@@ -145,6 +150,9 @@ export default function AdminControlCenter({ token }) {
         </button>
         <button onClick={() => setSection("infrastructure")} style={section === "infrastructure" ? tabActive : tabInactive}>
           Secrets & Database
+        </button>
+        <button onClick={() => setSection("observability")} style={section === "observability" ? tabActive : tabInactive}>
+          Observability & Metrics
         </button>
       </div>
 
@@ -449,6 +457,85 @@ export default function AdminControlCenter({ token }) {
               >
                 Rotate Secret Now
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Observability & Metrics Tab */}
+      {section === "observability" && !loading && obsStats && (
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>
+            <div style={statCard}>
+              <div style={{ ...statNum, color: "#1976d2" }}>{obsStats.requests_by_role?.admin || 0}</div>
+              <div style={statLabel}>Admin Users / Calls</div>
+            </div>
+            <div style={statCard}>
+              <div style={{ ...statNum, color: "#388e3c" }}>{obsStats.requests_by_role?.user || 0}</div>
+              <div style={statLabel}>Standard Users / Calls</div>
+            </div>
+            <div style={statCard}>
+              <div style={{ ...statNum, color: "#7b1fa2" }}>{obsStats.classifications_by_tier?.pro || 0}</div>
+              <div style={statLabel}>Pro Tier Active</div>
+            </div>
+            <div style={statCard}>
+              <div style={{ ...statNum, color: "#f57c00" }}>{obsStats.classifications_by_tier?.enterprise || 0}</div>
+              <div style={statLabel}>Enterprise Tier Active</div>
+            </div>
+          </div>
+
+          <div style={cardStyle}>
+            <h4 style={{ margin: "0 0 12px" }}>Traffic & Quota Breakdown by Subscription Tier</h4>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "12px" }}>
+              {Object.entries(obsStats.classifications_by_tier || {}).map(([tier, count]) => (
+                <div key={tier} style={{ background: "#f8f9fa", padding: "12px", borderRadius: "6px", border: "1px solid #e9ecef" }}>
+                  <div style={{ fontSize: "0.8rem", color: "#6c757d", textTransform: "uppercase", fontWeight: "600" }}>{tier} Plan</div>
+                  <div style={{ fontSize: "1.4rem", fontWeight: "700", color: "#333", marginTop: "4px" }}>{count}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={cardStyle}>
+            <h4 style={{ margin: "0 0 12px" }}>Authentication & Identity Events Health</h4>
+            {Object.keys(obsStats.auth_events_summary || {}).length === 0 ? (
+              <p style={{ color: "#777", fontSize: "0.85rem" }}>No auth events recorded in this session yet.</p>
+            ) : (
+              <table style={tableStyle}>
+                <thead>
+                  <tr style={{ background: "#f5f5f5", textAlign: "left" }}>
+                    <th style={thStyle}>Event Type & Role</th>
+                    <th style={thStyle}>Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(obsStats.auth_events_summary).map(([key, count]) => (
+                    <tr key={key} style={{ borderBottom: "1px solid #eee" }}>
+                      <td style={tdStyle}><code>{key}</code></td>
+                      <td style={tdStyle}><strong>{count}</strong></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div style={cardStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h4 style={{ margin: 0 }}>Prometheus Raw Metrics Exporter</h4>
+                <p style={{ margin: "4px 0 0", color: "#666", fontSize: "0.85rem" }}>
+                  Exposing system-wide histograms, latency quantiles, and per-role counters formatted for Prometheus & Grafana.
+                </p>
+              </div>
+              <a
+                href="/metrics"
+                target="_blank"
+                rel="noreferrer"
+                style={{ backgroundColor: "#212121", color: "#fff", textDecoration: "none", padding: "8px 16px", borderRadius: "6px", fontWeight: "600", fontSize: "0.85rem" }}
+              >
+                Open /metrics ↗
+              </a>
             </div>
           </div>
         </div>

@@ -233,3 +233,127 @@ export async function adminGetDatabaseStatus(token) {
   return handleResponse(response);
 }
 
+// --- Phase 7: Notifications ---
+
+export async function fetchNotifications(token, skip = 0, limit = 20) {
+  const response = await fetch(`${BASE_URL}/notifications?skip=${skip}&limit=${limit}`, {
+    headers: getAuthHeaders(token),
+  });
+  return handleResponse(response);
+}
+
+export async function markNotificationRead(token, notificationId) {
+  const response = await fetch(`${BASE_URL}/notifications/${notificationId}/read`, {
+    method: "PATCH",
+    headers: getAuthHeaders(token),
+  });
+  return handleResponse(response);
+}
+
+export async function markAllNotificationsRead(token) {
+  const response = await fetch(`${BASE_URL}/notifications/mark-all-read`, {
+    method: "POST",
+    headers: getAuthHeaders(token),
+  });
+  return handleResponse(response);
+}
+
+// --- Phase 7: Billing & Subscriptions ---
+
+export async function fetchBillingPlans() {
+  const response = await fetch(`${BASE_URL}/billing/plans`);
+  return handleResponse(response);
+}
+
+export async function fetchUserSubscription(token) {
+  const response = await fetch(`${BASE_URL}/billing/subscription`, {
+    headers: getAuthHeaders(token),
+  });
+  return handleResponse(response);
+}
+
+export async function createCheckoutSession(token, planTier, successUrl, cancelUrl) {
+  const response = await fetch(`${BASE_URL}/billing/checkout-session`, {
+    method: "POST",
+    headers: getAuthHeaders(token),
+    body: JSON.stringify({
+      plan_tier: planTier,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+    }),
+  });
+  return handleResponse(response);
+}
+
+export async function cancelUserSubscription(token) {
+  const response = await fetch(`${BASE_URL}/billing/cancel`, {
+    method: "POST",
+    headers: getAuthHeaders(token),
+  });
+  return handleResponse(response);
+}
+
+// --- Phase 7: Verification & Password Reset ---
+
+export async function requestEmailVerification(token) {
+  const response = await fetch(`${BASE_URL}/auth/verify-email/request`, {
+    method: "POST",
+    headers: getAuthHeaders(token),
+  });
+  return handleResponse(response);
+}
+
+export async function confirmEmailVerification(verifyToken) {
+  const response = await fetch(`${BASE_URL}/auth/verify-email/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: verifyToken }),
+  });
+  return handleResponse(response);
+}
+
+export async function requestPasswordReset(email) {
+  const response = await fetch(`${BASE_URL}/auth/password-reset/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  return handleResponse(response);
+}
+
+export async function confirmPasswordReset(resetToken, newPassword) {
+  const response = await fetch(`${BASE_URL}/auth/password-reset/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: resetToken, new_password: newPassword }),
+  });
+  return handleResponse(response);
+}
+
+// --- Phase 7: GDPR & Account Management ---
+
+export async function exportAccountData(token) {
+  const response = await fetch(`${BASE_URL}/account/export-data`, {
+    headers: getAuthHeaders(token),
+  });
+  return handleResponse(response);
+}
+
+export async function deleteAccount(token, password, confirmation) {
+  const response = await fetch(`${BASE_URL}/account/delete-my-account`, {
+    method: "DELETE",
+    headers: getAuthHeaders(token),
+    body: JSON.stringify({ password, confirmation }),
+  });
+  return handleResponse(response);
+}
+
+// --- Phase 7: Observability Dashboard ---
+
+export async function adminGetObservabilityStats(token) {
+  const response = await fetch(`${BASE_URL}/admin/observability/stats`, {
+    headers: getAuthHeaders(token),
+  });
+  return handleResponse(response);
+}
+

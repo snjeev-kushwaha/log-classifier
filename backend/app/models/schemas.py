@@ -182,3 +182,96 @@ class ClassificationHistoryItem(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# --- Phase 7: Email Verification & Password Reset ---
+
+class EmailVerificationConfirm(BaseModel):
+    token: str = Field(..., min_length=1)
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=6, max_length=128)
+
+
+# --- Phase 7: Notifications ---
+
+class NotificationResponse(BaseModel):
+    id: int
+    title: str
+    message: str
+    type: str
+    is_read: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationListResponse(BaseModel):
+    items: list[NotificationResponse]
+    total: int
+    unread_count: int
+
+
+# --- Phase 7: Billing & Plan Tiers ---
+
+class PlanTierInfo(BaseModel):
+    tier: str
+    name: str
+    price_usd: int
+    daily_quota: int
+    features: list[str]
+
+
+class SubscriptionResponse(BaseModel):
+    plan_tier: str
+    status: str
+    daily_quota: int
+    current_period_end: Optional[datetime] = None
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+class CheckoutSessionRequest(BaseModel):
+    plan_tier: str = Field(..., description="Target plan tier: pro or enterprise")
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+
+
+class CheckoutSessionResponse(BaseModel):
+    checkout_url: str
+    session_id: str
+
+
+# --- Phase 7: GDPR & Account Management ---
+
+class DeleteAccountRequest(BaseModel):
+    password: Optional[str] = None
+    confirmation: str = Field(..., description="Must be 'DELETE MY ACCOUNT'")
+
+
+class DataExportResponse(BaseModel):
+    user_profile: dict[str, Any]
+    classification_history: list[dict[str, Any]]
+    api_keys: list[dict[str, Any]]
+    usage_counters: list[dict[str, Any]]
+    notifications: list[dict[str, Any]]
+    subscription: Optional[dict[str, Any]] = None
+    exported_at: datetime
+
+
+# --- Phase 7: Observability Dashboard ---
+
+class ObservabilityStatsResponse(BaseModel):
+    requests_by_role: dict[str, int]
+    classifications_by_tier: dict[str, int]
+    auth_events_summary: dict[str, int]
+    system_health: dict[str, Any]

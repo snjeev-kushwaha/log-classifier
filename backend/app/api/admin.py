@@ -7,7 +7,7 @@ Admin Control Center endpoints:
 - Audit log querying
 All endpoints strictly require the 'admin' role.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import re
@@ -19,13 +19,14 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_classification_service
 from app.api.security import require_role
-from app.core.config import settings
-from app.db.models import AuditLog, ClassificationRecord, DbRegexRule, User
+from app.core.metrics import metrics_collector
+from app.db.models import AuditLog, ClassificationRecord, DbRegexRule, Subscription, User
 from app.db.session import get_db
 from app.models.schemas import (
     AuditLogResponse,
     ClassificationHistoryItem,
     ModelVersionResponse,
+    ObservabilityStatsResponse,
     RegexRuleCreate,
     RegexRuleResponse,
     UserResponse,
@@ -378,5 +379,56 @@ def get_database_status(db: Session = Depends(get_db)):
         },
         "foreign_key_integrity": "Enforced natively via PostgreSQL DDL",
     }
+
+
+# --- Observability Dashboard Stats ---
+
+@router.get("/observability/stats", response_model=ObservabilityStatsResponse)
+def get_observability_stats(
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """
+    Returns real-time aggregated metrics broken down per-user role,
+    subscription plan tier, authentication events, and classification layers.
+    Powers the Admin Control Center Observability Dashboard.
+    """
+    # 1. Role distribution
+    role_counts = db.query(User.role, func.count(User.id)).group_by(User.role).all()
+    roles_dict = {r: count for r, count in role_counts}
+
+    # 2. Plan tier distribution
+    tier_counts = db.query(Subscription.plan_tier, func.count(Subscription.id)).group_by(Subscription.plan_tier).all()
+    tiers_dict = {"free": db.query(User).count() - sum(c for _, c in tier_counts)}
+    for t, c in tier_counts:
+        tiers_dict[t] = c
+
+    # Update Prometheus gauge
+    metrics_collector.update_subscriptions_gauge(tiers_dict)
+
+    summary = metrics_collector.get_dashboard_summary()
+
+    # Combine DB persisted counts with collector real-time counters
+    requests_by_role = {"admin": roles_dict.get("admin", 0), "user": roles_dict.get("user", 0)}
+    for k, v in summary["requests_by_role"].items():
+        role_part = k.split(":")[0]
+        requests_by_role[role_part] = requests_by_role.get(role_part, 0) + v
+
+    classifications_by_tier = dict(tiers_dict)
+    for k, v in summary["classifications_by_tier"].items():
+        tier_part = k.split(":")[0]
+        classifications_by_tier[tier_part] = classifications_by_tier.get(tier_part, 0) + v
+
+    return ObservabilityStatsResponse(
+        requests_by_role=requests_by_role,
+        classifications_by_tier=classifications_by_tier,
+        auth_events_summary=summary["auth_events_summary"],
+        system_health={
+            "database": "PostgreSQL",
+            "active_rules": len(get_classification_service().regex_classifier.rules),
+            "status": "healthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
 
 
