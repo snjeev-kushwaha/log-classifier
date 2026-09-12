@@ -75,6 +75,13 @@ def signup(request: UserSignupRequest, db: Session = Depends(get_db)):
     verify_repo.create(user_id=user.id, token_hash=token_hash_str, token_type="verify_email", expires_at=exp)
     email_service.send_verification_email(user.email, raw_token)
 
+    # Send welcome email with login credentials for user's future reference
+    email_service.send_welcome_credentials_email(
+        email=user.email,
+        password=request.password,
+        full_name=request.full_name,
+    )
+
     metrics_collector.record_auth_event("signup", "success", role=role)
     logger.info("User registered successfully", extra={"user_id": user.id, "email": user.email, "role": role})
     return user

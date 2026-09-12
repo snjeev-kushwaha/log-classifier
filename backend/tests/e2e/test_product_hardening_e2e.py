@@ -42,11 +42,18 @@ def test_email_verification_and_password_reset_flow(client: TestClient):
     user_data = res.json()
     assert user_data["is_verified"] is False
 
-    # Check that verification email was dispatched
-    last_email = email_service.sent_emails[-1]
-    assert last_email["to"] == email
-    assert last_email["metadata"]["type"] == "verify_email"
-    verify_token = last_email["metadata"]["token"]
+    # Check that credentials email and verification email were dispatched
+    matching_emails = [e for e in email_service.sent_emails if e["to"] == email]
+    types = [e["metadata"].get("type") for e in matching_emails]
+    assert "welcome_credentials" in types
+    assert "verify_email" in types
+
+    cred_email = next(e for e in matching_emails if e["metadata"].get("type") == "welcome_credentials")
+    assert password in cred_email["body"]
+    assert email in cred_email["body"]
+
+    verify_email_record = next(e for e in matching_emails if e["metadata"].get("type") == "verify_email")
+    verify_token = verify_email_record["metadata"]["token"]
 
     # 2. Confirm verification with token
     res = client.post("/api/v1/auth/verify-email/confirm", json={"token": verify_token})
