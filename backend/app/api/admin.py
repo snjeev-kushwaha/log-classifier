@@ -50,6 +50,7 @@ from app.repositories.postgres import (
     SqlUserRepository,
 )
 from app.services.classification_service import ClassificationService
+from app.services.email import email_service
 from app.services.ml_classifier import MLClassifier
 from app.services.regex_classifier import RegexRule
 
@@ -117,6 +118,14 @@ def create_user(
         target=f"user:{new_user.id}",
         metadata={"email": new_user.email, "role": new_user.role, "admin_email": current_admin.email},
     )
+
+    # Dispatch welcome email with credentials to the newly created user
+    email_service.send_welcome_credentials_email(
+        email=new_user.email,
+        password=request.password,
+        full_name=new_user.full_name,
+    )
+
     return new_user
 
 
