@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -86,6 +86,7 @@ def list_users(
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def create_user(
     request: AdminUserCreateRequest,
+    background_tasks: BackgroundTasks,
     current_admin: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
@@ -119,8 +120,9 @@ def create_user(
         metadata={"email": new_user.email, "role": new_user.role, "admin_email": current_admin.email},
     )
 
-    # Dispatch welcome email with credentials to the newly created user
-    email_service.send_welcome_credentials_email(
+    # Dispatch welcome email with credentials to the newly created user in background
+    background_tasks.add_task(
+        email_service.send_welcome_credentials_email,
         email=new_user.email,
         password=request.password,
         full_name=new_user.full_name,

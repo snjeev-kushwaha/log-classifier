@@ -26,7 +26,7 @@ class ClassificationMethod(str, Enum):
 # --- Classification Schemas ---
 
 class LogClassifyRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=8000)
+    text: str = Field(..., min_length=1, max_length=65536)
     source: Optional[str] = Field(default=None, description="Originating service/host, if known")
 
 
@@ -43,6 +43,28 @@ class FeedbackRequest(BaseModel):
     text: str
     correct_label: str
     original_method: ClassificationMethod
+
+
+class MultiLogItemResult(BaseModel):
+    line_number: int
+    text: str
+    label: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    method_used: ClassificationMethod
+    needs_human_review: bool = False
+    reasoning: Optional[str] = None
+
+
+class MultiLogClassifyRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=1048576)
+    source: Optional[str] = Field(default=None, description="Originating service/host, if known")
+
+
+class MultiLogClassifyResponse(BaseModel):
+    total_logs: int
+    category_counts: dict[str, int]
+    incident_reasoning: str
+    items: list[MultiLogItemResult]
 
 
 class HealthResponse(BaseModel):

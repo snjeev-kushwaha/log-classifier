@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # --- Groq / LLM settings ---
     groq_api_key: str = ""
-    groq_model: str = "deepseek-r1-distill-llama-70b"  # or a Qwen model on Groq
+    groq_model: str = "qwen/qwen3.8-27b"
     llm_timeout_seconds: float = 8.0
     llm_max_retries: int = 2
 

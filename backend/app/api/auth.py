@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -46,7 +46,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def signup(request: UserSignupRequest, db: Session = Depends(get_db)):
+def signup(
+    request: UserSignupRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     user_repo = SqlUserRepository(db)
     existing_user = user_repo.get_by_email(request.email)
     if existing_user:
@@ -76,10 +80,11 @@ def signup(request: UserSignupRequest, db: Session = Depends(get_db)):
     token_hash_str = hash_token(raw_token)
     exp = datetime.now(timezone.utc) + timedelta(hours=settings.verification_token_expire_hours)
     verify_repo.create(user_id=user.id, token_hash=token_hash_str, token_type="verify_email", expires_at=exp)
-    email_service.send_verification_email(user.email, raw_token)
-
-    # Send welcome email with login credentials for user's future reference
-    email_service.send_welcome_credentials_email(
+    
+    # Asynchronously dispatch emails via background tasks so signup responds instantaneously (<200ms)
+    background_tasks.add_task(email_service.send_verification_email, user.email, raw_token)
+    background_tasks.add_task(
+        email_service.send_welcome_credentials_email,
         email=user.email,
         password=request.password,
         full_name=request.full_name,
@@ -420,6 +425,7 @@ async def oauth_callback(provider: str, request: Request, db: Session = Depends(
 
 @router.post("/verify-email/request", status_code=status.HTTP_200_OK)
 def request_email_verification(
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -432,7 +438,7 @@ def request_email_verification(
     token_hash_str = hash_token(raw_token)
     exp = datetime.now(timezone.utc) + timedelta(hours=settings.verification_token_expire_hours)
     verify_repo.create(user_id=current_user.id, token_hash=token_hash_str, token_type="verify_email", expires_at=exp)
-    email_service.send_verification_email(current_user.email, raw_token)
+    background_tasks.add_task(email_service.send_verification_email, current_user.email, raw_token)
 
     return {"status": "sent", "message": "Verification link sent to your registered email address."}
 
@@ -468,6 +474,7 @@ def confirm_email_verification(
 @router.post("/password-reset/request", status_code=status.HTTP_200_OK)
 def request_password_reset(
     payload: PasswordResetRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Initiate a password reset flow. Sends a reset link if the user exists."""
@@ -480,7 +487,7 @@ def request_password_reset(
         token_hash_str = hash_token(raw_token)
         exp = datetime.now(timezone.utc) + timedelta(hours=settings.password_reset_token_expire_hours)
         verify_repo.create(user_id=user.id, token_hash=token_hash_str, token_type="password_reset", expires_at=exp)
-        email_service.send_password_reset_email(user.email, raw_token)
+        background_tasks.add_task(email_service.send_password_reset_email, user.email, raw_token)
 
     # Standard security practice: always return 200 to prevent email enumeration
     return {"status": "sent", "message": "If an account with that email exists, a password reset link has been sent."}

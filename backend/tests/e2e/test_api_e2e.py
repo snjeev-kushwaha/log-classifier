@@ -95,3 +95,24 @@ def test_llm_outage_still_returns_a_usable_response(client, mock_llm_classifier)
     assert response.status_code == 200
     body = response.json()
     assert body["method_used"] in {"human_review", "ml"}
+
+
+def test_classify_multi_logs_end_to_end(client):
+    """Verifies that multi-line logs are classified individually and return incident reasoning."""
+    logs = (
+        "2026-09-13 14:22:01.120 UTC [4821] ERROR: deadlock detected on relation 'orders'\n"
+        "Multiple login failures occurred on user 9052 account from IP 198.51.100.4\n"
+        "total memory: 64172 MB, used: 64000 MB"
+    )
+    response = client.post("/api/v1/classify/multi", json={"text": logs})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_logs"] == 3
+    assert "workflow_error" in body["category_counts"]
+    assert "security_alert" in body["category_counts"]
+    assert "resource_usage" in body["category_counts"]
+    assert len(body["items"]) == 3
+    assert body["incident_reasoning"]
+    assert body["items"][0]["line_number"] == 1
+    assert body["items"][0]["label"] == "workflow_error"
+

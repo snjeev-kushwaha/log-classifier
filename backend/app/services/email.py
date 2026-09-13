@@ -2,6 +2,7 @@
 Email delivery service supporting credentials delivery, email verification, and password resets.
 Provides simulated delivery (for tests/development) and robust SMTP delivery (for Gmail, Outlook, SES, SendGrid, etc.).
 """
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import logging
 import smtplib
@@ -12,6 +13,9 @@ from typing import Any, Optional
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Background executor for external SMTP network calls so HTTP requests never block
+_email_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="smtp_delivery")
 
 
 class EmailService:
@@ -158,35 +162,44 @@ class EmailService:
         self.sent_emails.append(record)
 
         if settings.smtp_host:
-            try:
-                msg = MIMEMultipart("alternative")
-                msg["From"] = settings.email_from
-                msg["To"] = to_email
-                msg["Subject"] = subject
-                msg.attach(MIMEText(body_text, "plain"))
-                if body_html:
-                    msg.attach(MIMEText(body_html, "html"))
+            msg = MIMEMultipart("alternative")
+            msg["From"] = settings.email_from
+            msg["To"] = to_email
+            msg["Subject"] = subject
+            msg.attach(MIMEText(body_text, "plain"))
+            if body_html:
+                msg.attach(MIMEText(body_html, "html"))
 
-                if settings.smtp_port == 465:
-                    with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=10.0) as server:
-                        if settings.smtp_user and settings.smtp_password:
-                            server.login(settings.smtp_user, settings.smtp_password)
-                        server.sendmail(settings.email_from, [to_email], msg.as_string())
-                else:
-                    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10.0) as server:
-                        server.starttls()
-                        if settings.smtp_user and settings.smtp_password:
-                            server.login(settings.smtp_user, settings.smtp_password)
-                        server.sendmail(settings.email_from, [to_email], msg.as_string())
-
-                logger.info("Sent email to %s via SMTP (%s): %s", to_email, settings.smtp_host, subject)
-                return True
-            except Exception as e:
-                logger.error("Failed to send SMTP email to %s: %s", to_email, e)
-                return False
+            # Dispatch network call asynchronously so callers never block on SMTP latency
+            _email_executor.submit(self._deliver_smtp, msg, to_email, subject)
+            return True
         else:
             logger.info("Email service (simulated delivery) to %s: %s", to_email, subject)
             return True
+
+    def _deliver_smtp(self, msg: MIMEMultipart, to_email: str, subject: str) -> None:
+        try:
+            if settings.smtp_port == 465:
+                with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=4.0) as server:
+                    if settings.smtp_user and settings.smtp_password:
+                        server.login(settings.smtp_user, settings.smtp_password)
+                    server.sendmail(settings.email_from, [to_email], msg.as_string())
+            else:
+                with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=4.0) as server:
+                    server.starttls()
+                    if settings.smtp_user and settings.smtp_password:
+                        server.login(settings.smtp_user, settings.smtp_password)
+                    server.sendmail(settings.email_from, [to_email], msg.as_string())
+
+            try:
+                logger.info("Sent email to %s via SMTP (%s): %s", to_email, settings.smtp_host, subject)
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                logger.error("Failed to send SMTP email to %s: %s", to_email, e)
+            except Exception:
+                pass
 
 
 email_service = EmailService()

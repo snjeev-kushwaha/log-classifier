@@ -18,15 +18,33 @@ const SAMPLE_LOGS = [
   },
 ];
 
-export default function LogInput({ onSubmit, isLoading }) {
+export default function LogInput({ onSubmit, isLoading, onInputChange, onClear, maxChars = 65536 }) {
   const [text, setText] = useState("");
   const [error, setError] = useState("");
+
+  function handleChange(event) {
+    const val = event.target.value;
+    setText(val);
+    if (error) setError("");
+    if (onInputChange) onInputChange(val);
+  }
+
+  function handleClear() {
+    setText("");
+    setError("");
+    if (onClear) onClear();
+    if (onInputChange) onInputChange("");
+  }
 
   function handleSubmit(event) {
     if (event) event.preventDefault();
     const trimmed = text.trim();
     if (!trimmed) {
       setError("Enter a log line before classifying");
+      return;
+    }
+    if (trimmed.length > maxChars) {
+      setError(`Log message exceeds maximum limit of ${maxChars.toLocaleString()} characters (${trimmed.length.toLocaleString()} characters entered). Please shorten or test individual lines.`);
       return;
     }
     setError("");
@@ -36,6 +54,8 @@ export default function LogInput({ onSubmit, isLoading }) {
   function handleSelectSample(sampleText) {
     setText(sampleText);
     if (error) setError("");
+    if (onClear) onClear();
+    if (onInputChange) onInputChange(sampleText);
   }
 
   return (
@@ -72,10 +92,7 @@ export default function LogInput({ onSubmit, isLoading }) {
           id="log-text"
           data-testid="log-textarea"
           value={text}
-          onChange={(event) => {
-            setText(event.target.value);
-            if (error) setError("");
-          }}
+          onChange={handleChange}
           onKeyDown={(event) => {
             if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
               handleSubmit(event);
@@ -85,6 +102,43 @@ export default function LogInput({ onSubmit, isLoading }) {
           rows={4}
         />
       </div>
+
+      {/* Dynamic line & char indicators */}
+      {text.length > 0 && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "6px 2px 4px", fontSize: "0.8rem", color: "#64748b" }}>
+          <span>
+            {text.includes("\n") && (
+              <span className="multiline-hint">
+                <i className="bi bi-card-text"></i> {text.split("\n").filter((l) => l.trim()).length} lines detected
+              </span>
+            )}
+          </span>
+          <span className={`char-counter ${text.length > maxChars ? "char-limit-exceeded" : ""}`}>
+            {text.length.toLocaleString()} / {maxChars.toLocaleString()} chars
+          </span>
+        </div>
+      )}
+
+      {/* Multi-Log Batch Analysis Indicator */}
+      {text.split("\n").map((l) => l.trim()).filter(Boolean).length > 1 && (
+        <div className="multiline-mode-badge" data-testid="multiline-badge" style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          padding: "8px 12px",
+          margin: "8px 0 4px",
+          background: "rgba(59, 130, 246, 0.08)",
+          border: "1px solid rgba(59, 130, 246, 0.25)",
+          borderRadius: "6px",
+          fontSize: "0.82rem",
+          color: "#3b82f6"
+        }}>
+          <i className="bi bi-layers-fill" style={{ fontSize: "1rem" }}></i>
+          <span>
+            <strong>Multi-Log Analysis Mode:</strong> {text.split("\n").map((l) => l.trim()).filter(Boolean).length} log events will be analyzed concurrently with AI root-cause diagnosis.
+          </span>
+        </div>
+      )}
 
       {error && (
         <div className="error-text" data-testid="input-error">
@@ -99,10 +153,7 @@ export default function LogInput({ onSubmit, isLoading }) {
             <button
               type="button"
               className="log-clear-btn"
-              onClick={() => {
-                setText("");
-                if (error) setError("");
-              }}
+              onClick={handleClear}
             >
               <i className="bi bi-x-circle"></i> Clear
             </button>

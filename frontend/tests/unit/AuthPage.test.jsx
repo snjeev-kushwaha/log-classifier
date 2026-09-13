@@ -54,6 +54,47 @@ describe("AuthPage Component", () => {
     });
   });
 
+  it("submits signup form, logs in automatically, and invokes onAuthSuccess", async () => {
+    const onAuthSuccess = vi.fn();
+    const user = userEvent.setup();
+    vi.spyOn(api, "signupUser").mockResolvedValue({
+      id: 99,
+      email: "newuser@example.com",
+      full_name: "New User",
+      role: "user",
+    });
+    vi.spyOn(api, "loginUser").mockResolvedValue({
+      access_token: "mock-new-access-token",
+      refresh_token: "mock-new-refresh-token",
+    });
+
+    render(<AuthPage onAuthSuccess={onAuthSuccess} onContinueAsGuest={vi.fn()} />);
+
+    // Switch to Create Account tab
+    await user.click(screen.getByText("Create Account"));
+
+    await user.type(screen.getByPlaceholderText("Jane Doe"), "New User");
+    await user.type(screen.getByPlaceholderText("user@example.com"), "newuser@example.com");
+    await user.type(screen.getByPlaceholderText("••••••••"), "NewUserPassword123!");
+    await user.click(screen.getByTestId("auth-submit-btn"));
+
+    await waitFor(() => {
+      expect(api.signupUser).toHaveBeenCalledWith({
+        email: "newuser@example.com",
+        password: "NewUserPassword123!",
+        fullName: "New User",
+      });
+      expect(api.loginUser).toHaveBeenCalledWith({
+        email: "newuser@example.com",
+        password: "NewUserPassword123!",
+      });
+      expect(onAuthSuccess).toHaveBeenCalledWith({
+        access_token: "mock-new-access-token",
+        refresh_token: "mock-new-refresh-token",
+      });
+    });
+  });
+
   it("calls onContinueAsGuest when clicking explore as guest link", async () => {
     const onContinueAsGuest = vi.fn();
     const user = userEvent.setup();

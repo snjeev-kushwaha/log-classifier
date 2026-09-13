@@ -36,6 +36,15 @@ export async function classifyLog(text, token) {
   return handleResponse(response);
 }
 
+export async function classifyMultiLogs(text, token) {
+  const response = await fetch(`${BASE_URL}/classify/multi`, {
+    method: "POST",
+    headers: getAuthHeaders(token),
+    body: JSON.stringify({ text }),
+  });
+  return handleResponse(response);
+}
+
 export async function submitFeedback({ text, correctLabel, originalMethod }, token) {
   const response = await fetch(`${BASE_URL}/feedback`, {
     method: "POST",
@@ -54,6 +63,26 @@ export async function submitFeedback({ text, correctLabel, originalMethod }, tok
 export async function checkHealth() {
   const response = await fetch(`${BASE_URL}/health`);
   return handleResponse(response);
+}
+
+export async function classifyBatch(file, token) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const activeToken = token || localStorage.getItem("access_token");
+  const headers = {};
+  if (activeToken) {
+    headers["Authorization"] = `Bearer ${activeToken}`;
+  }
+  const response = await fetch(`${BASE_URL}/classify/batch`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || `Batch classification failed with status ${response.status}`);
+  }
+  return response.blob();
 }
 
 // --- Auth Endpoints ---

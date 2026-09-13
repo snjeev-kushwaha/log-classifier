@@ -23,6 +23,8 @@ from app.models.schemas import (
     FeedbackRequest,
     HealthResponse,
     LogClassifyRequest,
+    MultiLogClassifyRequest,
+    MultiLogClassifyResponse,
 )
 from app.repositories.postgres import (
     SqlNotificationRepository,
@@ -137,6 +139,65 @@ def classify_log(
     metrics_collector.record_request(current_user.role if current_user else "anonymous", "/classify", 200)
 
     return result
+
+
+@router.post("/classify/multi", response_model=MultiLogClassifyResponse, dependencies=[Depends(require_api_key)])
+@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
+def classify_multi_logs(
+    request: Request,
+    payload: MultiLogClassifyRequest,
+    service: ClassificationService = Depends(get_classification_service),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+):
+    user_tier = "free"
+    effective_quota = settings.daily_user_quota
+
+    if current_user and current_user.id and current_user.id > 0:
+        sub_repo = SqlSubscriptionRepository(db)
+        user_sub = sub_repo.get_by_user_id(current_user.id)
+        if user_sub and user_sub.status == "active":
+            user_tier = user_sub.plan_tier
+            effective_quota = get_tier_daily_quota(user_tier)
+
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        usage_repo = SqlUsageRepository(db)
+        count, within_limit = usage_repo.increment_and_check(current_user.id, today_str, effective_quota)
+        if not within_limit:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Daily usage quota exceeded ({effective_quota} classifications/day for {user_tier.upper()} plan).",
+            )
+
+    rule_repo = SqlRegexRuleRepository(db)
+    active_rules = rule_repo.list_active()
+
+    response = service.classify_multi(
+        payload.text,
+        source=payload.source,
+        db_rules=active_rules,
+    )
+
+    records_to_persist = [
+        ClassificationRecord(
+            user_id=current_user.id if (current_user and current_user.id > 0) else None,
+            text=item.text,
+            label=item.label,
+            confidence=item.confidence,
+            method_used=item.method_used.value,
+            needs_human_review=item.needs_human_review,
+        )
+        for item in response.items
+    ]
+    if records_to_persist:
+        db.bulk_save_objects(records_to_persist)
+        db.commit()
+
+    for item in response.items:
+        metrics_collector.record_classification(user_tier, item.method_used.value)
+    metrics_collector.record_request(current_user.role if current_user else "anonymous", "/classify/multi", 200)
+
+    return response
 
 
 @router.post("/classify/batch", dependencies=[Depends(require_api_key)])

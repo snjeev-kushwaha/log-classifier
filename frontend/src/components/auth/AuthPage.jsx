@@ -31,13 +31,17 @@ export default function AuthPage({ onAuthSuccess, onContinueAsGuest }) {
           setLoading(false);
           return;
         }
-        const data = await signupUser({
+        await signupUser({
           email: emailOrUsername.trim(),
           password,
           fullName: fullName.trim() || undefined,
         });
         setSuccessMsg("Account created! Logging you in...");
-        onAuthSuccess(data);
+        const loginData = await loginUser({
+          email: emailOrUsername.trim(),
+          password,
+        });
+        onAuthSuccess(loginData);
       }
     } catch (err) {
       setError(err.message || "Authentication failed. Please verify credentials.");

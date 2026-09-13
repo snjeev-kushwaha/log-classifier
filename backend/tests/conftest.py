@@ -40,6 +40,8 @@ def trained_ml_classifier():
 def mock_llm_classifier():
     mock = MagicMock()
     mock.classify.return_value = ("workflow_error", 0.82, "Matches escalation failure pattern")
+    mock.generate_incident_reasoning.return_value = "Incident diagnosis summary across event logs."
+    mock.classify_batch.return_value = {}
     return mock
 
 

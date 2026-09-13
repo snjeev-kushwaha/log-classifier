@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import LogInput from "./components/LogInput.jsx";
 import ClassificationResult from "./components/ClassificationResult.jsx";
+import MultiLogResult from "./components/MultiLogResult.jsx";
 import UserPlatform from "./components/UserPlatform.jsx";
 import AdminControlCenter from "./components/AdminControlCenter.jsx";
 import AuthPage from "./components/auth/AuthPage.jsx";
@@ -8,6 +9,7 @@ import Sidebar from "./components/layout/Sidebar.jsx";
 import Topbar from "./components/layout/Topbar.jsx";
 import {
   classifyLog,
+  classifyMultiLogs,
   submitFeedback,
   fetchCurrentUser,
   logoutUser,
@@ -118,7 +120,13 @@ export default function App({ defaultGuest }) {
     setResult(null);
 
     try {
-      const data = await classifyLog(text, token);
+      const lineCount = text.split("\n").map((l) => l.trim()).filter(Boolean).length;
+      let data;
+      if (lineCount > 1) {
+        data = await classifyMultiLogs(text, token);
+      } else {
+        data = await classifyLog(text, token);
+      }
       setResult(data);
     } catch (err) {
       setApiError(err.message || "Classification failed. Check backend connectivity.");
@@ -180,7 +188,17 @@ export default function App({ defaultGuest }) {
             </div>
 
             <div className="app">
-              <LogInput onSubmit={handleClassify} isLoading={isLoading} />
+              <LogInput
+                onSubmit={handleClassify}
+                isLoading={isLoading}
+                onInputChange={() => {
+                  if (apiError) setApiError("");
+                }}
+                onClear={() => {
+                  setApiError("");
+                  setResult(null);
+                }}
+              />
               {apiError && (
                 <div className="card api-error-card" data-testid="api-error">
                   <div className="api-error-content">
@@ -189,10 +207,23 @@ export default function App({ defaultGuest }) {
                       <strong>Classification Error</strong>
                       <p className="error-text">{apiError}</p>
                     </div>
+                    <button
+                      type="button"
+                      className="api-error-dismiss"
+                      onClick={() => setApiError("")}
+                      title="Dismiss error"
+                      aria-label="Dismiss error"
+                    >
+                      <i className="bi bi-x-lg"></i>
+                    </button>
                   </div>
                 </div>
               )}
-              <ClassificationResult result={result} onCorrect={handleCorrect} />
+              {result && result.items ? (
+                <MultiLogResult result={result} />
+              ) : (
+                <ClassificationResult result={result} onCorrect={handleCorrect} />
+              )}
 
               {/* Upgrade / Account Prompt - Same width as log message box */}
               <div className="guest-cta-banner">
@@ -239,6 +270,7 @@ export default function App({ defaultGuest }) {
         onNewClassification={() => {
           setActiveView("classifier");
           setResult(null);
+          setApiError("");
         }}
         onOpenAuth={() => setGuestMode(false)}
       />
@@ -292,13 +324,42 @@ export default function App({ defaultGuest }) {
         <main className="chatgpt-content-scroll">
           {activeView === "classifier" && (
             <div className="app">
-              <LogInput onSubmit={handleClassify} isLoading={isLoading} />
+              <LogInput
+                onSubmit={handleClassify}
+                isLoading={isLoading}
+                onInputChange={() => {
+                  if (apiError) setApiError("");
+                }}
+                onClear={() => {
+                  setApiError("");
+                  setResult(null);
+                }}
+              />
               {apiError && (
-                <div className="card" data-testid="api-error">
-                  <p className="error-text">{apiError}</p>
+                <div className="card api-error-card" data-testid="api-error" style={{ marginBottom: "16px" }}>
+                  <div className="api-error-content">
+                    <i className="bi bi-exclamation-octagon-fill"></i>
+                    <div>
+                      <strong>Classification Error</strong>
+                      <p className="error-text">{apiError}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="api-error-dismiss"
+                      onClick={() => setApiError("")}
+                      title="Dismiss error"
+                      aria-label="Dismiss error"
+                    >
+                      <i className="bi bi-x-lg"></i>
+                    </button>
+                  </div>
                 </div>
               )}
-              <ClassificationResult result={result} onCorrect={handleCorrect} />
+              {result && result.items ? (
+                <MultiLogResult result={result} />
+              ) : (
+                <ClassificationResult result={result} onCorrect={handleCorrect} />
+              )}
             </div>
           )}
 

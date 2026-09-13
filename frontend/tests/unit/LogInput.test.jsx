@@ -43,4 +43,40 @@ describe("LogInput", () => {
     expect(screen.getByTestId("classify-button")).toBeDisabled();
     expect(screen.getByTestId("classify-button")).toHaveTextContent(/classifying/i);
   });
+
+  it("calls onInputChange when typing and onClear when clicking Clear button", async () => {
+    const onInputChange = vi.fn();
+    const onClear = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <LogInput
+        onSubmit={vi.fn()}
+        isLoading={false}
+        onInputChange={onInputChange}
+        onClear={onClear}
+      />
+    );
+
+    const textarea = screen.getByTestId("log-textarea");
+    await user.type(textarea, "database error");
+    expect(onInputChange).toHaveBeenCalledWith("database error");
+
+    const clearButton = screen.getByRole("button", { name: /clear/i });
+    expect(clearButton).toBeInTheDocument();
+    await user.click(clearButton);
+
+    expect(onClear).toHaveBeenCalledTimes(1);
+    expect(textarea).toHaveValue("");
+  });
+
+  it("shows character counter and multi-line hint when multi-line text is entered", async () => {
+    const user = userEvent.setup();
+    render(<LogInput onSubmit={vi.fn()} isLoading={false} />);
+
+    const textarea = screen.getByTestId("log-textarea");
+    await user.type(textarea, "Line 1{enter}Line 2");
+
+    expect(screen.getByText(/2 lines detected/i)).toBeInTheDocument();
+    expect(screen.getByText(/chars/i)).toBeInTheDocument();
+  });
 });

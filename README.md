@@ -40,7 +40,7 @@ Designed to provide high-throughput, sub-millisecond classification for standard
    * If confidence drops below `ML_CONFIDENCE_THRESHOLD` (default: 0.75), automatically escalates to Layer 3.
 3. **Layer 3: Generative AI Reasoning (Groq LLM Fallback)**
    * Engaged for rare, novel, or ambiguous log patterns.
-   * Leverages high-speed LLMs via Groq (e.g., `deepseek-r1-distill-llama-70b` or `llama-3.3-70b-versatile`) with structured JSON outputs.
+   * Leverages high-speed LLMs via Groq (e.g., `qwen/qwen3.8-27b` or `openai/gpt-oss-120b`) with structured JSON outputs.
    * Logs below `LLM_FALLBACK_CONFIDENCE_THRESHOLD` (default: 0.60) are queued for human review.
 4. **Continuous Retraining Loop**
    * Persists inference telemetry and human feedback to database records for incremental model retraining.
