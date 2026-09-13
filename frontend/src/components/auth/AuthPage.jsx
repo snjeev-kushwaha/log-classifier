@@ -239,6 +239,7 @@ export default function AuthPage({ onAuthSuccess, onContinueAsGuest }) {
           <button
             type="button"
             className="auth-guest-link"
+            data-testid="explore-guest-btn"
             onClick={onContinueAsGuest}
           >
             <span>Explore Classifier Console as Guest</span>

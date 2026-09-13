@@ -161,7 +161,68 @@ export default function App({ defaultGuest }) {
     );
   }
 
-  // 2. Authenticated Platform & Workspace View
+  // 2. Guest Mode: Classifier input only, NO sidebar, with back button to login/signup screen
+  if (!token && guestMode) {
+    return (
+      <div className="guest-classifier-layout" data-testid="guest-classifier-layout">
+        <main className="guest-main-content">
+          <div className="guest-container">
+            {/* Header Hero Section */}
+            <div className="guest-hero-section">
+              <div className="guest-hero-badge">
+                <i className="bi bi-cpu-fill"></i>
+                <span>Multi-Model Classification Console</span>
+              </div>
+              <h1 className="guest-hero-title">Real-Time Log Classifier</h1>
+              <p className="guest-hero-desc">
+                Analyze and categorize raw infrastructure, security, and application logs in real time using our hybrid Regex, BERT ML, and Groq LLM triage engine.
+              </p>
+            </div>
+
+            <div className="app">
+              <LogInput onSubmit={handleClassify} isLoading={isLoading} />
+              {apiError && (
+                <div className="card api-error-card" data-testid="api-error">
+                  <div className="api-error-content">
+                    <i className="bi bi-exclamation-octagon-fill"></i>
+                    <div>
+                      <strong>Classification Error</strong>
+                      <p className="error-text">{apiError}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <ClassificationResult result={result} onCorrect={handleCorrect} />
+
+              {/* Upgrade / Account Prompt - Same width as log message box */}
+              <div className="guest-cta-banner">
+                <div className="guest-cta-left">
+                  <i className="bi bi-stars"></i>
+                  <div>
+                    <strong>Unlock Full Enterprise Platform</strong>
+                    <p>Create an account or sign in to access bulk classification, API keys, regex rules engine, and system telemetry.</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="guest-cta-btn"
+                  onClick={() => {
+                    setGuestMode(false);
+                    setResult(null);
+                    setApiError("");
+                  }}
+                >
+                  Sign In / Register →
+                </button>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // 3. Authenticated Platform & Workspace View
   return (
     <div className="chatgpt-layout">
       <Sidebar
