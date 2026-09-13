@@ -163,9 +163,9 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           )}
 
           <div style={{ marginBottom: "12px" }}>
-            <label style={labelStyle}>Email Address</label>
+            <label style={labelStyle}>{isSignup ? "Email Address" : "Email Address or Username"}</label>
             <input
-              type="email"
+              type={isSignup ? "email" : "text"}
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}

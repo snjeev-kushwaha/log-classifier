@@ -164,11 +164,28 @@ export async function adminListUsers(token, { skip = 0, limit = 50, role, q } = 
   return handleResponse(response);
 }
 
+export async function adminCreateUser(token, { email, password, full_name, role = "user", is_active = true }) {
+  const response = await fetch(`${BASE_URL}/admin/users`, {
+    method: "POST",
+    headers: getAuthHeaders(token),
+    body: JSON.stringify({ email, password, full_name, role, is_active }),
+  });
+  return handleResponse(response);
+}
+
 export async function adminUpdateUser(token, userId, updates) {
   const response = await fetch(`${BASE_URL}/admin/users/${userId}`, {
     method: "PATCH",
     headers: getAuthHeaders(token),
     body: JSON.stringify(updates),
+  });
+  return handleResponse(response);
+}
+
+export async function adminDeleteUser(token, userId) {
+  const response = await fetch(`${BASE_URL}/admin/users/${userId}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(token),
   });
   return handleResponse(response);
 }

@@ -55,9 +55,12 @@ def signup(request: UserSignupRequest, db: Session = Depends(get_db)):
             detail="Email is already registered",
         )
 
-    # First user registered in an empty DB automatically receives admin role for easy bootstrapping
-    _, total_users = user_repo.list_users(limit=1)
-    role = "admin" if total_users == 0 else "user"
+    # First registered user automatically receives admin role for easy bootstrapping
+    non_root_query = db.query(User)
+    if settings.root_user_email:
+        non_root_query = non_root_query.filter(User.email != settings.root_user_email.lower().strip())
+    total_non_root = non_root_query.count()
+    role = "admin" if total_non_root == 0 else "user"
 
     hashed_pw = hash_password(request.password)
     user = user_repo.create(
@@ -192,7 +195,11 @@ def handle_oauth_user_flow(
 def login(request: UserLoginRequest, req_meta: Request, db: Session = Depends(get_db)):
     user_repo = SqlUserRepository(db)
 
-    user = user_repo.get_by_email(request.email)
+    lookup_email = request.email.strip()
+    if settings.root_user_username and lookup_email.lower() == settings.root_user_username.lower():
+        lookup_email = settings.root_user_email
+
+    user = user_repo.get_by_email(lookup_email)
     if not user or not user.hashed_password or not verify_password(request.password, user.hashed_password):
         metrics_collector.record_auth_event("login", "failure", role="anonymous")
         raise HTTPException(

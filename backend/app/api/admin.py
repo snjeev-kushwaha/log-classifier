@@ -20,9 +20,21 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_classification_service
 from app.api.security import require_role
 from app.core.metrics import metrics_collector
-from app.db.models import AuditLog, ClassificationRecord, DbRegexRule, Subscription, User
+from app.core.security import hash_password
+from app.db.models import (
+    ApiKey,
+    AuditLog,
+    ClassificationRecord,
+    DbRegexRule,
+    Notification,
+    RefreshToken,
+    Subscription,
+    UsageCounter,
+    User,
+)
 from app.db.session import get_db
 from app.models.schemas import (
+    AdminUserCreateRequest,
     AuditLogResponse,
     ClassificationHistoryItem,
     ModelVersionResponse,
@@ -70,6 +82,44 @@ def list_users(
     }
 
 
+@router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def create_user(
+    request: AdminUserCreateRequest,
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Create a new user account directly from the Admin Control Center."""
+    user_repo = SqlUserRepository(db)
+    audit_repo = SqlAuditLogRepository(db)
+
+    existing = user_repo.get_by_email(request.email)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A user with this email address already exists",
+        )
+
+    role_val = request.role.value if hasattr(request.role, "value") else str(request.role)
+    hashed_pw = hash_password(request.password)
+    new_user = user_repo.create(
+        email=request.email,
+        hashed_password=hashed_pw,
+        full_name=request.full_name,
+        role=role_val,
+    )
+    if not request.is_active:
+        user_repo.update(new_user, is_active=False)
+    user_repo.update(new_user, is_verified=True)
+
+    audit_repo.log(
+        actor_id=current_admin.id,
+        action="USER_CREATE",
+        target=f"user:{new_user.id}",
+        metadata={"email": new_user.email, "role": new_user.role, "admin_email": current_admin.email},
+    )
+    return new_user
+
+
 @router.patch("/users/{user_id}", response_model=UserResponse)
 def update_user(
     user_id: int,
@@ -104,6 +154,47 @@ def update_user(
     )
 
     return updated_user
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_200_OK)
+def delete_user(
+    user_id: int,
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Permanently delete a user account from the Admin Control Center."""
+    if current_admin.id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Administrators cannot delete their own account from the control center.",
+        )
+
+    user_repo = SqlUserRepository(db)
+    audit_repo = SqlAuditLogRepository(db)
+
+    target_user = user_repo.get_by_id(user_id)
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    target_email = target_user.email
+
+    # Clean up related records
+    db.query(RefreshToken).filter(RefreshToken.user_id == user_id).delete()
+    db.query(ApiKey).filter(ApiKey.user_id == user_id).delete()
+    db.query(UsageCounter).filter(UsageCounter.user_id == user_id).delete()
+    db.query(Notification).filter(Notification.user_id == user_id).delete()
+    db.query(Subscription).filter(Subscription.user_id == user_id).delete()
+
+    db.delete(target_user)
+    db.commit()
+
+    audit_repo.log(
+        actor_id=current_admin.id,
+        action="USER_DELETE",
+        target=f"user:{user_id}",
+        metadata={"email": target_email, "admin_email": current_admin.email},
+    )
+    return {"status": "deleted", "user_id": user_id, "message": f"User {target_email} was deleted successfully."}
 
 
 # --- System-wide Classification Activity & Telemetry ---

@@ -4,7 +4,12 @@ Run with: uvicorn app.main:app --reload
 """
 import logging
 import time
+import warnings
 from contextlib import asynccontextmanager
+
+from authlib.deprecate import AuthlibDeprecationWarning
+
+warnings.filterwarnings("ignore", category=AuthlibDeprecationWarning)
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +30,7 @@ from app.api.user import router as user_router
 from app.core.config import settings
 from app.core.logging_config import configure_logging, set_request_id
 from app.db.session import Base, engine
+import app.db.models  # noqa: F401
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -33,6 +39,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    from app.services.bootstrap import ensure_root_admin
+    ensure_root_admin()
     if settings.environment == "production" and not settings.api_keys_set:
         # Fail loudly rather than silently serving an unauthenticated API.
         raise RuntimeError(

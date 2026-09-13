@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     daily_user_quota: int = 1000
     secrets_manager_backend: str = "vault_or_env"
 
+    # --- Default Root / Admin User Credentials ---
+    root_user_email: str = "root@admin.com"
+    root_user_username: str = "root"
+    root_user_password: str = "RootAdminPassword123!"
+    root_user_name: str = "Root Administrator"
+
     # --- OAuth2 settings ---
     google_client_id: str = ""
     google_client_secret: str = ""
