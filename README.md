@@ -64,18 +64,7 @@ cp .env.example .env
 | `JWT_SECRET_KEY` | **Required** for signing access tokens and session security. | `dev-jwt-secret-key-...` | Generate with `openssl rand -hex 32` |
 | `DATABASE_URL` | Database connection URI. Defaults to local SQLite file for zero-config local development. | `sqlite:///./log_classifier.db` | PostgreSQL in production: `postgresql+psycopg://user:pass@localhost:5432/db` |
 
-### 2. Default Administrator Credentials
-
-When the database is initialized, a default administrator account is automatically provisioned:
-
-| Variable | Description | Default |
-|---|---|---|
-| `ROOT_USER_EMAIL` | Admin email address | `root@admin.com` |
-| `ROOT_USER_USERNAME` | Admin login username | `root` |
-| `ROOT_USER_PASSWORD` | Admin login password | `RootAdminPassword123!` |
-| `ROOT_USER_NAME` | Admin full name | `Root Administrator` |
-
-### 3. Optional Keys (Integrations & Production)
+### 2. Optional Keys (Integrations & Production)
 
 | Category | Variable | Purpose |
 |---|---|---|
